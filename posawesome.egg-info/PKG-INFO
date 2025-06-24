@@ -1,0 +1,9 @@
+Metadata-Version: 2.2
+Name: posawesome
+Version: 15.2.2
+Summary: POS Awesome
+Author: Yousef Restom
+Author-email: youssef@totrox.com
+Dynamic: author
+Dynamic: author-email
+Dynamic: summary
