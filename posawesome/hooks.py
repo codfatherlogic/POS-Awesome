@@ -164,6 +164,7 @@ fixtures = [
                     "Item Barcode-posa_uom",
                     "POS Profile-posa_pos_awesome_settings",
                     "POS Profile-posa_allow_delete",
+                    "POS Profile-posa_allow_delete_offline_invoice",
                     "POS Profile-posa_allow_user_to_edit_rate",
                     "POS Profile-posa_allow_user_to_edit_additional_discount",
                     "POS Profile-posa_allow_user_to_edit_item_discount",
@@ -257,6 +258,8 @@ fixtures = [
                     "POS Profile-posa_allow_reconcile_payments",
                     "POS Profile-column_break_uolvm",
                     "POS Profile-posa_allow_mpesa_reconcile_payments",
+                    "POS Profile-posa_enable_camera_scanning",
+                    "POS Profile-posa_camera_scan_type",
                 ),
             ]
         ],
@@ -272,7 +275,8 @@ fixtures = [
                 "name",
                 "in",
                 [
-                    "POS Profile-posa_allow_multi_currency"
+                    "POS Profile-posa_allow_multi_currency",
+                    "POS Profile-posa_decimal_precision"
                 ]
             ]
         ]

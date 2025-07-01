@@ -90,7 +90,13 @@ class POSClosingShift(Document):
 @frappe.whitelist()
 def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
     cashiers_list = frappe.get_all("POS Profile User", filters=filters, fields=["user"])
-    return [c["user"] for c in cashiers_list]
+    result = []
+    for cashier in cashiers_list:
+        user_email = frappe.get_value("User", cashier.user, "email")
+        if user_email:
+            # Return list of tuples in format (value, label) where value is user ID and label shows both ID and email
+            result.append([cashier.user, f"{cashier.user} ({user_email})"])
+    return result
 
 
 @frappe.whitelist()

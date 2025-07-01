@@ -1,0 +1,186 @@
+:root {
+  --dynamic-xs: 4px;
+  --dynamic-sm: 8px;
+  --dynamic-md: 16px;
+  --dynamic-lg: 24px;
+  --dynamic-xl: 32px;
+  --container-height: 75vh;
+  --card-height: 60vh;
+  --font-scale: 1;
+
+  --cancel-start: #d32f2f;
+  --cancel-end: #c62828;
+  --submit-start: #388e3c;
+  --submit-end: #2e7d32;
+  --primary-start: #1976d2;
+  --primary-end: #1565c0;
+  --dialog-bg-start: #ffffff;
+  --dialog-bg-end: #f8f9fa;
+  --dialog-border: #e0e0e0;
+}
+
+:root.dark-theme {
+  --cancel-start: #b71c1c;
+  --cancel-end: #c62828;
+  --submit-start: #2e7d32;
+  --submit-end: #1b5e20;
+  --primary-start: #985EFF;
+  --primary-end: #BB86FC;
+  --dialog-bg-start: #1E1E1E;
+  --dialog-bg-end: #121212;
+  --dialog-border: #373737;
+
+  /* Dark mode palette tokens */
+  --background: #121212;
+  --surface: #1E1E1E;
+  --primary: #BB86FC;
+  --primary-variant: #985EFF;
+  --secondary: #03DAC6;
+  --error: #CF6679;
+  --on-background: #FFFFFF;
+  --on-surface: #FFFFFF;
+  --disabled-text: rgba(255, 255, 255, 0.38);
+  --divider: #373737;
+}
+
+/* Base responsive utilities */
+.dynamic-spacing-xs { padding: var(--dynamic-xs); }
+.dynamic-spacing-sm { padding: var(--dynamic-sm); }
+.dynamic-spacing-md { padding: var(--dynamic-md); }
+.dynamic-spacing-lg { padding: var(--dynamic-lg); }
+.dynamic-spacing-xl { padding: var(--dynamic-xl); }
+
+.dynamic-margin-xs { margin: var(--dynamic-xs); }
+.dynamic-margin-sm { margin: var(--dynamic-sm); }
+.dynamic-margin-md { margin: var(--dynamic-md); }
+.dynamic-margin-lg { margin: var(--dynamic-lg); }
+.dynamic-margin-xl { margin: var(--dynamic-xl); }
+
+/* Responsive text scaling */
+.dynamic-text {
+  font-size: calc(1rem * var(--font-scale));
+}
+
+.dynamic-text-sm {
+  font-size: calc(0.875rem * var(--font-scale));
+}
+
+.dynamic-text-lg {
+  font-size: calc(1.125rem * var(--font-scale));
+}
+
+/* Common Button Styles */
+.pos-action-btn {
+  border-radius: 12px !important;
+  text-transform: none !important;
+  font-weight: 600 !important;
+  padding: 12px 32px !important;
+  min-width: 120px !important;
+  transition: all 0.3s ease !important;
+  color: white !important;
+}
+
+.pos-action-btn .v-icon {
+  color: white !important;
+}
+
+.pos-action-btn span {
+  color: white !important;
+}
+
+/* Button Variants */
+.pos-action-btn.cancel-action-btn {
+  background: linear-gradient(135deg, var(--cancel-start) 0%, var(--cancel-end) 100%) !important;
+}
+
+.pos-action-btn.submit-action-btn {
+  background: linear-gradient(135deg, var(--submit-start) 0%, var(--submit-end) 100%) !important;
+}
+
+.pos-action-btn.sync-action-btn {
+  background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%) !important;
+}
+
+.pos-action-btn.primary-action-btn {
+  background: linear-gradient(135deg, var(--primary-start) 0%, var(--primary-end) 100%) !important;
+}
+
+/* Hover Effects */
+.pos-action-btn:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3) !important;
+}
+
+.pos-action-btn.cancel-action-btn:hover {
+  box-shadow: 0 6px 20px rgba(211, 47, 47, 0.4) !important;
+}
+
+.pos-action-btn.submit-action-btn:hover {
+  box-shadow: 0 6px 20px rgba(46, 125, 50, 0.4) !important;
+}
+
+.pos-action-btn.sync-action-btn:hover,
+.pos-action-btn.primary-action-btn:hover {
+  box-shadow: 0 6px 20px rgba(25, 118, 210, 0.4) !important;
+}
+
+/* Disabled State */
+.pos-action-btn:disabled {
+  opacity: 0.6 !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.pos-action-btn:disabled .v-icon,
+.pos-action-btn:disabled span {
+  color: white !important;
+}
+
+/* Dialog Actions Container */
+.dialog-actions-container {
+  background: linear-gradient(135deg, var(--dialog-bg-start) 0%, var(--dialog-bg-end) 100%) !important;
+  border-top: 1px solid var(--dialog-border) !important;
+  padding: 16px 24px !important;
+  gap: 12px !important;
+}
+
+/* Responsive Design for Buttons */
+@media (max-width: 768px) {
+  .dialog-actions-container {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  
+  .pos-action-btn {
+    width: 100% !important;
+    min-width: unset !important;
+  }
+}
+/* Dark mode styles for date picker */
+.dark-theme .dark-field,
+.v-theme--dark .dark-field {
+  background-color: #1E1E1E !important;
+}
+.dark-theme .dark-field .v-field__input,
+.v-theme--dark .dark-field .v-field__input,
+.dark-theme .dark-field input,
+.v-theme--dark .dark-field input,
+.dark-theme .dark-field .v-label,
+.v-theme--dark .dark-field .v-label {
+  color: #fff !important;
+}
+.dark-theme .dark-field .v-field__overlay,
+.v-theme--dark .dark-field .v-field__overlay {
+  background-color: #1E1E1E !important;
+}
+.dark-theme .dp__input,
+.v-theme--dark .dp__input {
+  background-color: #1E1E1E !important;
+  color: #fff !important;
+}
+.dark-theme .dp__menu,
+.v-theme--dark .dp__menu {
+  background-color: #1E1E1E !important;
+  color: #fff !important;
+}
+
