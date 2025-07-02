@@ -1,4 +1,4 @@
-import { isOffline, saveCustomerBalance, getCachedCustomerBalance } from "../../../offline.js";
+import { isOffline, saveCustomerBalance, getCachedCustomerBalance, getCachedPriceListItems, getItemUOMs } from "../../../offline/index.js";
 
 export default {
 
@@ -63,7 +63,8 @@ export default {
           new_item.qty = -Math.abs(new_item.qty || 1);
         }
         this.items.unshift(new_item);
-        this.update_item_detail(new_item);
+        // Force update of item rates when item is first added
+        this.update_item_detail(new_item, true);
 
         // Expand new item if it has batch or serial number
         if ((!this.pos_profile.posa_auto_set_batch && new_item.has_batch_no) || new_item.has_serial_no) {
@@ -276,7 +277,7 @@ export default {
       var vm = this;
       if (doc.name && this.pos_profile.posa_allow_delete) {
         await frappe.call({
-          method: "posawesome.posawesome.api.posapp.delete_invoice",
+        method: "posawesome.posawesome.api.invoices.delete_invoice",
           args: { invoice: doc.name },
           async: true,
           callback: function (r) {
@@ -489,9 +490,16 @@ export default {
 
       // Currency related fields
       doc.currency = this.selected_currency || this.pos_profile.currency;
-      doc.conversion_rate = this.exchange_rate || 1;
-      doc.plc_conversion_rate = this.exchange_rate || 1;
-      doc.price_list_currency = doc.currency;
+      doc.conversion_rate =
+        (this.invoice_doc && this.invoice_doc.conversion_rate) ||
+        this.exchange_rate ||
+        1;
+      doc.plc_conversion_rate =
+        (this.invoice_doc && this.invoice_doc.plc_conversion_rate) ||
+        doc.conversion_rate;
+
+      // Use actual price list currency if available
+      doc.price_list_currency = this.price_list_currency || doc.currency;
 
       // Other fields
       doc.campaign = doc.campaign || this.pos_profile.campaign;
@@ -545,9 +553,14 @@ export default {
       doc.grand_total = grandTotal;
       doc.base_grand_total = grandTotal * (1 / this.exchange_rate || 1);
 
-      // Apply rounding to get rounded total
-      doc.rounded_total = this.roundAmount(grandTotal);
-      doc.base_rounded_total = this.roundAmount(doc.base_grand_total);
+      // Apply rounding to get rounded total unless disabled in POS Profile
+      if (this.pos_profile.disable_rounded_total) {
+        doc.rounded_total = flt(grandTotal, this.currency_precision);
+        doc.base_rounded_total = flt(doc.base_grand_total, this.currency_precision);
+      } else {
+        doc.rounded_total = this.roundAmount(grandTotal);
+        doc.base_rounded_total = this.roundAmount(doc.base_grand_total);
+      }
 
       // Add POS specific fields
       doc.posa_pos_opening_shift = this.pos_opening_shift.name;
@@ -605,7 +618,9 @@ export default {
 
       // Add flags to ensure proper rate handling
       doc.ignore_pricing_rule = 1;
-      doc.price_list_currency = doc.currency;
+
+      // Preserve the real price list currency
+      doc.price_list_currency = this.price_list_currency || doc.currency;
       doc.plc_conversion_rate = doc.conversion_rate;
       doc.ignore_default_fields = 1;  // Add this to prevent default field updates
 
@@ -662,7 +677,7 @@ export default {
       if (this.invoice_doc.doctype == "Sales Order") {
         await frappe.call({
           method:
-            "posawesome.posawesome.api.posapp.create_sales_invoice_from_order",
+          "posawesome.posawesome.api.invoices.create_sales_invoice_from_order",
           args: {
             sales_order: this.invoice_doc.name,
           },
@@ -907,7 +922,7 @@ export default {
         return vm.invoice_doc;
       }
       frappe.call({
-        method: "posawesome.posawesome.api.posapp.update_invoice",
+      method: "posawesome.posawesome.api.invoices.update_invoice",
         args: {
           data: doc,
         },
@@ -930,7 +945,7 @@ export default {
         return vm.invoice_doc;
       }
       frappe.call({
-        method: "posawesome.posawesome.api.posapp.update_invoice_from_order",
+        method: "posawesome.posawesome.api.invoices.update_invoice_from_order",
         args: {
           data: doc,
         },
@@ -1031,15 +1046,31 @@ export default {
         invoice_doc.currency = this.selected_currency || this.pos_profile.currency;
         invoice_doc.conversion_rate = this.exchange_rate || 1;
 
-        // Update totals in invoice_doc to match current calculations
-        invoice_doc.total = this.Total;
-        invoice_doc.grand_total = this.subtotal;
+        // Preserve totals calculated on the server to ensure taxes are included
+        // The process_invoice method already updates the invoice with taxes and
+        // totals via the backend. Overriding those values here caused the
+        // payment dialog to display amounts without taxes applied. Simply use
+        // the values returned from the server instead of recalculating them on
+        // the client side.
 
-        // Apply rounding to get rounded total
-        invoice_doc.rounded_total = this.roundAmount(this.subtotal);
-        invoice_doc.base_total = this.Total * (1 / this.exchange_rate || 1);
-        invoice_doc.base_grand_total = this.subtotal * (1 / this.exchange_rate || 1);
-        invoice_doc.base_rounded_total = this.roundAmount(invoice_doc.base_grand_total);
+        // Update totals on the client has been disabled. The original code is
+        // kept below for reference and is intentionally commented out to avoid
+        // overriding the server calculated values.
+        // invoice_doc.total = this.Total;
+        // invoice_doc.grand_total = this.subtotal;
+
+        // if (this.pos_profile.disable_rounded_total) {
+        //   invoice_doc.rounded_total = flt(this.subtotal, this.currency_precision);
+        // } else {
+        //   invoice_doc.rounded_total = this.roundAmount(this.subtotal);
+        // }
+        // invoice_doc.base_total = this.Total * (1 / this.exchange_rate || 1);
+        // invoice_doc.base_grand_total = this.subtotal * (1 / this.exchange_rate || 1);
+        // if (this.pos_profile.disable_rounded_total) {
+        //   invoice_doc.base_rounded_total = flt(invoice_doc.base_grand_total, this.currency_precision);
+        // } else {
+        //   invoice_doc.base_rounded_total = this.roundAmount(invoice_doc.base_grand_total);
+        // }
 
         // Check if this is a return invoice
         if (this.isReturnInvoice || invoice_doc.is_return) {
@@ -1243,7 +1274,7 @@ export default {
     get_draft_invoices() {
       var vm = this;
       frappe.call({
-        method: "posawesome.posawesome.api.posapp.get_draft_invoices",
+        method: "posawesome.posawesome.api.invoices.get_draft_invoices",
         args: {
           pos_opening_shift: this.pos_opening_shift.name,
         },
@@ -1260,7 +1291,7 @@ export default {
     get_draft_orders() {
       var vm = this;
       frappe.call({
-        method: "posawesome.posawesome.api.posapp.search_orders",
+      method: "posawesome.posawesome.api.sales_orders.search_orders",
         args: {
           company: this.pos_profile.company,
           currency: this.pos_profile.currency,
@@ -1291,10 +1322,10 @@ export default {
 
       try {
         const response = await frappe.call({
-          method: "posawesome.posawesome.api.posapp.get_items_details",
+          method: "posawesome.posawesome.api.items.get_items_details",
           args: {
-            pos_profile: this.pos_profile,
-            items_data: items
+            pos_profile: JSON.stringify(this.pos_profile),
+            items_data: JSON.stringify(items)
           }
         });
 
@@ -1323,7 +1354,7 @@ export default {
     },
 
     // Update details for a single item (fetch from backend)
-    update_item_detail(item) {
+    update_item_detail(item, force_update = false) {
       if (!item.item_code) {
         return;
       }
@@ -1336,11 +1367,11 @@ export default {
       // }
 
       frappe.call({
-        method: "posawesome.posawesome.api.posapp.get_item_detail",
+        method: "posawesome.posawesome.api.items.get_item_detail",
         args: {
           warehouse: this.pos_profile.warehouse,
           doc: this.get_invoice_doc(),
-          price_list: this.pos_profile.price_list,
+          price_list: this.selected_price_list || this.pos_profile.selling_price_list,
           item: {
             item_code: item.item_code,
             customer: this.customer,
@@ -1383,13 +1414,14 @@ export default {
               vm.set_batch_qty(item, null, false);
             }
 
-            // First save base rates if not exists or if in default currency
-            if (!item.base_rate || vm.selected_currency === vm.pos_profile.currency) {
+            // First save base rates if not exists, in default currency, or when force update is requested
+            if (force_update || !item.base_rate || vm.selected_currency === vm.pos_profile.currency) {
               // Always store base rates from server in base currency
-              item.base_price_list_rate = data.price_list_rate;
-
-              if (!item.posa_offer_applied) {
-                item.base_rate = data.price_list_rate;
+              if (data.price_list_rate !== 0 || !item.base_price_list_rate) {
+                item.base_price_list_rate = data.price_list_rate;
+                if (!item.posa_offer_applied) {
+                  item.base_rate = data.price_list_rate;
+                }
               }
             }
 
@@ -1483,58 +1515,116 @@ export default {
     },
 
     // Fetch customer details (info, price list, etc)
-    fetch_customer_details() {
+    async fetch_customer_details() {
       var vm = this;
       if (this.customer) {
-        frappe.call({
-          method: "posawesome.posawesome.api.posapp.get_customer_info",
-          args: {
-            customer: vm.customer,
-          },
-          async: false,
-          callback: (r) => {
-            const message = r.message;
-            if (!r.exc) {
-              vm.customer_info = {
-                ...message,
-              };
-            }
-            vm.update_price_list();
-          },
-        });
+        try {
+          const r = await frappe.call({
+          method: "posawesome.posawesome.api.customers.get_customer_info",
+            args: {
+              customer: vm.customer,
+            },
+          });
+          const message = r.message;
+          if (!r.exc) {
+            vm.customer_info = {
+              ...message,
+            };
+          }
+          // When force reload is enabled, automatically switch to the
+          // customer's default price list so that item rates are fetched
+          // correctly from the server.
+          if (vm.pos_profile.posa_force_reload_items && message.customer_price_list) {
+            vm.selected_price_list = message.customer_price_list;
+            vm.eventBus.emit("update_customer_price_list", message.customer_price_list);
+            vm.apply_cached_price_list(message.customer_price_list);
+          }
+        } catch (error) {
+          console.error("Failed to fetch customer details", error);
+        }
       }
     },
 
     // Get price list for current customer
     get_price_list() {
-      let price_list = this.pos_profile.selling_price_list;
-      if (this.customer_info && this.pos_profile) {
-        const { customer_price_list, customer_group_price_list } =
-          this.customer_info;
-        const pos_price_list = this.pos_profile.selling_price_list;
-        if (customer_price_list && customer_price_list != pos_price_list) {
-          price_list = customer_price_list;
-        } else if (
-          customer_group_price_list &&
-          customer_group_price_list != pos_price_list
-        ) {
-          price_list = customer_group_price_list;
-        }
-      }
-      return price_list;
+      // Use the currently selected price list if available,
+      // otherwise fall back to the POS Profile selling price list
+      return this.selected_price_list || this.pos_profile.selling_price_list;
     },
 
     // Update price list for customer
-    update_price_list() {
-      let price_list = this.get_price_list();
-      if (price_list == this.pos_profile.selling_price_list) {
-        this.selected_price_list = this.pos_profile.selling_price_list;
-        this.eventBus.emit("update_customer_price_list", null);
-      } else {
-        this.selected_price_list = price_list;
-        this.eventBus.emit("update_customer_price_list", price_list);
-      }
-    },
+      update_price_list() {
+        // Only set the POS Profile price list if it has changed
+        const price_list = this.pos_profile.selling_price_list;
+        if (this.selected_price_list !== price_list) {
+          this.selected_price_list = price_list;
+          // Clear any customer specific price list to avoid reloading items
+          this.eventBus.emit("update_customer_price_list", null);
+        }
+      },
+
+      // Apply cached price list rates to existing invoice items
+      apply_cached_price_list(price_list) {
+        const cached = getCachedPriceListItems(price_list);
+        if (!cached) {
+          return;
+        }
+
+        const map = {};
+        cached.forEach(ci => { map[ci.item_code] = ci; });
+
+        this.items.forEach(item => {
+          const ci = map[item.item_code];
+          if (!ci) return;
+
+          const newRate = ci.rate || ci.price_list_rate;
+          const priceCurrency = ci.currency || this.selected_currency;
+
+          if (priceCurrency === this.selected_currency) {
+            // Rate already in selected currency
+            item.base_price_list_rate = newRate * this.exchange_rate;
+            if (!item._manual_rate_set) {
+              item.base_rate = newRate * this.exchange_rate;
+            }
+            item.price_list_rate = newRate;
+            if (!item._manual_rate_set) {
+              item.rate = newRate;
+            }
+          } else {
+            // Rate in base currency
+            if (newRate !== 0 || !item.base_price_list_rate) {
+              item.base_price_list_rate = newRate;
+              if (!item._manual_rate_set) {
+                item.base_rate = newRate;
+              }
+            }
+
+            if (this.selected_currency !== this.pos_profile.currency) {
+              const conv = this.exchange_rate || 1;
+              const convRate = this.flt(newRate / conv, this.currency_precision);
+              if (newRate !== 0 || !item.price_list_rate) {
+                item.price_list_rate = convRate;
+              }
+              if (!item._manual_rate_set && (newRate !== 0 || !item.rate)) {
+                item.rate = convRate;
+              }
+            } else {
+              if (newRate !== 0 || !item.price_list_rate) {
+                item.price_list_rate = newRate;
+              }
+              if (!item._manual_rate_set && (newRate !== 0 || !item.rate)) {
+                item.rate = newRate;
+              }
+            }
+          }
+
+          // Recalculate final amounts
+          item.amount = this.flt(item.qty * item.rate, this.currency_precision);
+          item.base_amount = this.flt(item.qty * item.base_rate, this.currency_precision);
+        });
+
+        this.$forceUpdate();
+      },
 
     // Update additional discount amount based on percentage
     update_discount_umount() {
@@ -1729,7 +1819,24 @@ export default {
 
     // Update UOM (unit of measure) for an item and recalculate prices
     calc_uom(item, value) {
-      const new_uom = item.item_uoms.find((element) => element.uom == value);
+      let new_uom = item.item_uoms.find((element) => element.uom == value);
+
+      // try cached uoms when not found on item
+      if (!new_uom) {
+        const cached = getItemUOMs(item.item_code);
+        if (cached.length) {
+          item.item_uoms = cached;
+          new_uom = cached.find(u => u.uom == value);
+        }
+      }
+
+      // fallback to stock uom
+      if (!new_uom && item.stock_uom === value) {
+        new_uom = { uom: item.stock_uom, conversion_factor: 1 };
+        if (!item.item_uoms) item.item_uoms = [];
+        item.item_uoms.push(new_uom);
+      }
+
       if (!new_uom) {
         this.eventBus.emit("show_message", {
           title: __("UOM not found"),

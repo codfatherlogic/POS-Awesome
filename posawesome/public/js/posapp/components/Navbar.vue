@@ -4,14 +4,8 @@
 
     <!-- Top App Bar: application header with nav toggle, logo, title, and actions -->
 
-    <v-app-bar
-      app
-      flat
-      height="56"
-      :color="appBarColor"
-      :theme="isDark ? 'dark' : 'light'"
-      class="navbar-enhanced elevation-2 px-2 pb-1"
-    >
+    <v-app-bar app flat height="56" :color="appBarColor" :theme="isDark ? 'dark' : 'light'"
+      class="navbar-enhanced elevation-2 px-2 pb-1">
       <v-app-bar-nav-icon ref="navIcon" @click="handleNavClick" class="text-secondary nav-icon" />
 
       <v-img src="/assets/posawesome/js/posapp/components/pos/pos.png" alt="POS Awesome" max-width="32" class="mx-2" />
@@ -31,7 +25,7 @@
         <div class="status-info-always-visible">
           <div class="status-title-inline"
             :class="{ 'status-connected': statusColor === 'green', 'status-offline': statusColor === 'red' }">{{
-            statusText }}</div>
+              statusText }}</div>
           <div class="status-detail-inline">{{ syncInfoText }}</div>
         </div>
       </div>
@@ -108,6 +102,33 @@
               </div>
             </v-list-item>
 
+            <v-list-item @click="toggleManualOffline" class="menu-item-compact warning-action">
+              <template v-slot:prepend>
+                <div class="menu-icon-wrapper-compact warning-icon">
+                  <v-icon color="white" size="16">mdi-wifi-off</v-icon>
+                </div>
+              </template>
+              <div class="menu-content-compact">
+                <v-list-item-title class="menu-item-title-compact">{{ manualOffline ? __('Go Online') : __('Go Offline')
+                }}</v-list-item-title>
+                <v-list-item-subtitle class="menu-item-subtitle-compact">
+                  {{ manualOffline ? __('Disable offline mode') : __('Work without server connection') }}
+                </v-list-item-subtitle>
+              </div>
+            </v-list-item>
+
+            <v-list-item @click="clearCache" class="menu-item-compact neutral-action">
+              <template v-slot:prepend>
+                <div class="menu-icon-wrapper-compact neutral-icon">
+                  <v-icon color="white" size="16">mdi-delete-sweep-outline</v-icon>
+                </div>
+              </template>
+              <div class="menu-content-compact">
+                <v-list-item-title class="menu-item-title-compact">{{ __('Clear Cache') }}</v-list-item-title>
+                <v-list-item-subtitle class="menu-item-subtitle-compact">{{ __('Remove local data and refresh') }}</v-list-item-subtitle>
+              </div>
+            </v-list-item>
+
             <v-divider class="menu-section-divider-compact"></v-divider>
 
             <v-list-item @click="goAbout" class="menu-item-compact neutral-action">
@@ -123,15 +144,19 @@
               </div>
             </v-list-item>
 
-            <v-list-item @click="toggleTheme" class="menu-item-compact neutral-action">
+            <!-- Theme toggle menu item -->
+            <v-list-item @click="toggleTheme" class="menu-item-compact info-action">
               <template v-slot:prepend>
-                <div class="menu-icon-wrapper-compact neutral-icon">
-                  <v-icon color="white" size="16">mdi-theme-light-dark</v-icon>
+                <div class="menu-icon-wrapper-compact info-icon">
+                  <v-icon color="white" size="16">{{ isDark ? 'mdi-white-balance-sunny' : 'mdi-moon-waning-crescent'
+                  }}</v-icon>
                 </div>
               </template>
               <div class="menu-content-compact">
-                <v-list-item-title class="menu-item-title-compact">{{ isDark ? __('Light Mode') : __('Dark Mode') }}</v-list-item-title>
-                <v-list-item-subtitle class="menu-item-subtitle-compact">{{ __('Toggle theme') }}</v-list-item-subtitle>
+                <v-list-item-title class="menu-item-title-compact">{{ isDark ? __('Light Mode') : __('Dark Mode')
+                }}</v-list-item-title>
+                <v-list-item-subtitle class="menu-item-subtitle-compact">{{ __('Switch theme appearance')
+                  }}</v-list-item-subtitle>
               </div>
             </v-list-item>
 
@@ -179,7 +204,7 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-snackbar v-model="snack" :timeout="5000" :color="snackColor" location="top right">
+    <v-snackbar v-model="snack" :timeout="2000" :color="snackColor" location="top right">
       {{ snackText }}
     </v-snackbar>
 
@@ -211,7 +236,8 @@
               </v-chip>
             </div>
           </div>
-          <v-btn icon="mdi-close" variant="text" size="default" @click="showAboutDialog = false" class="close-btn-improved"></v-btn>
+          <v-btn icon="mdi-close" variant="text" size="default" @click="showAboutDialog = false"
+            class="close-btn-improved"></v-btn>
         </v-card-title>
 
         <v-card-text class="pa-0 white-background">
@@ -221,7 +247,7 @@
               <v-progress-circular indeterminate color="primary" size="50"></v-progress-circular>
               <p class="text-body-2 mt-3 mb-0">{{ __('Loading...') }}</p>
             </div>
-            
+
             <!-- Error State -->
             <div v-else-if="appInfoError" class="empty-state-improved text-center">
               <v-icon size="50" color="error" class="mb-3">mdi-alert-circle-outline</v-icon>
@@ -231,13 +257,13 @@
                 {{ __('Retry') }}
               </v-btn>
             </div>
-            
+
             <!-- Applications List - Improved -->
             <div v-else class="apps-list-improved">
               <div class="apps-header-improved">
                 <h4 class="text-h6 mb-2">{{ __('Installed Applications') }}</h4>
               </div>
-              
+
               <div class="apps-grid-improved">
                 <div v-for="app in appInfo" :key="app.app_name" class="app-item-improved">
                   <div class="app-icon-improved">
@@ -252,7 +278,7 @@
             </div>
           </div>
         </v-card-text>
-        
+
         <v-card-actions class="dialog-actions-improved pa-4">
           <div class="footer-info-improved">
             <span class="footer-text-improved">
@@ -274,8 +300,9 @@
 // Import the Socket.IO client library for real-time server status monitoring.
 // This import is crucial for the server connectivity indicator.
 import { io } from 'socket.io-client';
-import { getPendingOfflineInvoiceCount, syncOfflineInvoices, isOffline, getLastSyncTotals } from '../../offline.js';
+import { getPendingOfflineInvoiceCount, syncOfflineInvoices, isOffline, getLastSyncTotals, isManualOffline, setManualOffline, clearAllCache } from '../../offline.js';
 import OfflineInvoicesDialog from './OfflineInvoices.vue';
+import { silentPrint } from '../plugins/print.js';
 
 export default {
   name: 'NavBar', // Component name
@@ -304,6 +331,7 @@ export default {
       serverOnline: false,             // Boolean: Reflects the real-time server health via WebSocket (true if connected, false if disconnected)
       serverConnecting: false,         // Boolean: Indicates if the client is currently attempting to establish a connection to the server via WebSocket
       socket: null,                    // Instance of the Socket.IO client, used for real-time communication with the server
+      manualOffline: isManualOffline(), // Allows user to force offline mode manually
       offlineMessageShown: false,      // Flag to avoid repeating offline warnings
       showOfflineInvoices: false,      // Controls the Offline Invoices dialog
       showAboutDialog: false,          // Controls the About dialog
@@ -328,12 +356,23 @@ export default {
   },
   computed: {
     /**
+     * Detects whether the current host is an IPv4 address. When using an IP
+     * address with HTTPS the WebSocket connection may fail, so we treat the
+     * server as online as long as the browser itself is online.
+     */
+    isIpHost() {
+      return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(window.location.hostname);
+    },
+    /**
      * Determines the color of the status icon based on current network and server connectivity.
      * @returns {string} A Vuetify color string ('green', 'red').
      */
     statusColor() {
-      // Simplified: Green when connected to server, Red when offline
-      if (this.networkOnline && this.serverOnline) return 'green'; // Green when connected to server
+      // When running on an IP host we ignore the WebSocket status and rely on
+      // the browser's network status instead.
+      if (this.networkOnline && (this.serverOnline || this.isIpHost)) {
+        return 'green'; // Green when connected or IP host
+      }
       return 'red'; // Red for any offline state (no internet or server offline)
     },
     /**
@@ -342,8 +381,12 @@ export default {
      */
     statusIcon() {
       // Note: 'mdi-loading' is conceptually here, but `v-progress-circular` handles the visual loading state.
-      if (this.networkOnline && this.serverOnline) return 'mdi-wifi'; // Wi-Fi icon when connected to server
-      if (this.networkOnline && !this.serverOnline) return 'mdi-wifi-strength-alert-outline'; // Wi-Fi with alert for server offline
+      if (this.networkOnline && (this.serverOnline || this.isIpHost)) {
+        return 'mdi-wifi'; // Wi-Fi icon when connected to server or IP host
+      }
+      if (this.networkOnline && !this.serverOnline && !this.isIpHost) {
+        return 'mdi-wifi-strength-alert-outline'; // Wi-Fi with alert for server offline
+      }
       return 'mdi-wifi-off'; // Wi-Fi off icon when no internet connection
     },
     /**
@@ -354,6 +397,7 @@ export default {
     statusText() {
       if (this.serverConnecting) return this.__('Connecting to server...'); // Message when connecting
       if (!this.networkOnline) return this.__('No Internet Connection'); // Message when no internet
+      if (this.isIpHost) return this.__('Connected');
       return this.serverOnline ? this.__('Connected to Server') : this.__('Server Offline'); // Messages for server status
     },
     /**
@@ -383,7 +427,8 @@ export default {
       return this.$theme.current === 'dark';
     },
     appBarColor() {
-      return this.isDark ? '#1e1e1e' : 'white';
+      // Use theme colors directly
+      return this.isDark ? this.$vuetify.theme.themes.dark.colors.surface : 'white';
     }
   },
   watch: {
@@ -671,6 +716,36 @@ export default {
         this.socket.disconnect();
       }
     },
+
+    toggleManualOffline() {
+      this.manualOffline = !this.manualOffline;
+      setManualOffline(this.manualOffline);
+
+      // Show message with shorter duration
+      this.showMessage({
+        color: this.manualOffline ? 'warning' : 'success',
+        title: this.manualOffline ? this.__('Switched to Offline Mode') : this.__('Switched to Online Mode')
+      });
+
+      if (this.manualOffline) {
+        this.serverOnline = false;
+        window.serverOnline = false;
+        if (this.socket) {
+          this.socket.disconnect();
+        }
+        this.eventBus.emit('network-offline');
+      } else {
+        window.serverOnline = this.serverOnline;
+        if (this.networkOnline) {
+          if (this.socket) {
+            this.socket.connect();
+          } else {
+            this.initSocketConnection();
+          }
+        }
+        this.eventBus.emit(this.networkOnline ? 'network-online' : 'network-offline');
+      }
+    },
     // --- NAVIGATION AND POS ACTIONS ---
     /**
      * Toggles the visibility and mini-variant state of the side navigation drawer.
@@ -726,9 +801,12 @@ export default {
       // Construct the full print URL for the Sales Invoice
       const url = `${frappe.urllib.get_base_url()}/printview?doctype=Sales%20Invoice&name=${this.lastInvoiceId}` +
         `&trigger_print=1&format=${pf}&no_letterhead=${noLetterHead}`;
-      const win = window.open(url, '_blank'); // Open the URL in a new browser tab/window
-      // Add a one-time event listener to the new window to trigger print once it's loaded
-      win.addEventListener('load', () => win.print(), { once: true });
+      if (this.posProfile.posa_silent_print) {
+        silentPrint(url);
+      } else {
+        const win = window.open(url, '_blank');
+        win.addEventListener('load', () => win.print(), { once: true });
+      }
     },
     goAbout() {
       this.showAboutDialog = true;
@@ -740,7 +818,7 @@ export default {
       this.appInfoError = false;
 
       frappe.call({
-        method: 'posawesome.posawesome.api.posapp.get_app_info',
+        method: 'posawesome.posawesome.api.utilities.get_app_info',
         callback: r => {
           this.loadingAppInfo = false;
           if (Array.isArray(r.message.apps)) {
@@ -757,7 +835,25 @@ export default {
     },
 
     toggleTheme() {
+      // Toggle the theme using the theme plugin
       this.$theme.toggle();
+
+      // Force re-render of components that might not react to theme change
+      this.$forceUpdate();
+
+      // Add dark-theme class to document root for global CSS targeting
+      document.documentElement.classList.toggle('dark-theme', this.$theme.current === 'dark');
+
+      // Add a smooth transition class to the body for theme changes
+      document.body.classList.add('theme-transition');
+
+      // Remove the transition class after the transition completes
+      setTimeout(() => {
+        document.body.classList.remove('theme-transition');
+      }, 1000);
+
+      // Emit an event that other components can listen to
+      this.eventBus.emit('theme-changed', this.$theme.current);
     },
 
 
@@ -817,6 +913,16 @@ export default {
       this.updatePendingInvoices();
       this.eventBus.emit('pending_invoices_changed', this.pendingInvoices);
     },
+
+    async clearCache() {
+      try {
+        await clearAllCache();
+      } catch (e) {
+        console.error('Failed to clear cache', e);
+      } finally {
+        location.reload();
+      }
+    },
     /**
      * Displays a snackbar message at the top right of the screen.
      * @param {object} data - An object containing `color` (for snackbar styling) and `title` (the message text).
@@ -826,17 +932,7 @@ export default {
       this.snackColor = data.color; // Set snackbar color
       this.snackText = data.title; // Set snackbar text
     },
-    /**
-     * A dummy translation method. In a real Frappe environment, `frappe.__` or `window.__`
-     * would be used for proper internationalization. This is a placeholder for demonstration.
-     * @param {string} text - The text string to be translated.
-     * @returns {string} The original text (as this is a dummy implementation).
-     */
-    __(text) {
-      // In a real Frappe environment, you would use frappe.__ or window.__
-      // For this example, we'll return the text as is.
-      return text;
-    }
+    // Translation helper is provided globally via `eventBus` plugin.
   }
 };
 </script>
@@ -857,8 +953,8 @@ export default {
 
 /* Custom styling for the navigation drawer, including background and transition effects. */
 .drawer-custom {
-  background-color: #fafafa;
-  transition: all 0.3s ease-out;
+  background-color: var(--surface-secondary);
+  transition: var(--transition-normal);
 }
 
 /* Styling for the header section of the expanded navigation drawer. */
@@ -866,7 +962,7 @@ export default {
   display: flex;
   align-items: center;
   height: 64px;
-  padding: 0 16px;
+  padding: 0 var(--dynamic-md);
 }
 
 /* Styling for the header section of the mini (collapsed) navigation drawer. */
@@ -879,34 +975,34 @@ export default {
 
 /* Styling for the company name text within the drawer header. */
 .drawer-company {
-  margin-left: 12px;
+  margin-left: var(--dynamic-sm);
   flex: 1;
   font-weight: 500;
   font-size: 1rem;
-  color: #424242;
+  color: var(--text-primary);
 }
 
 /* Styling for icons within the navigation drawer list items. */
 .drawer-icon {
   font-size: 24px;
-  color: #1976d2;
+  color: var(--primary-start);
 }
 
 /* Styling for the title text of navigation drawer list items. */
 .drawer-item-title {
-  margin-left: 8px;
+  margin-left: var(--dynamic-xs);
   font-weight: 500;
-  color: #424242;
+  color: var(--text-primary);
 }
 
 /* Hover effect for all list items in the navigation drawer. */
 .v-list-item:hover {
-  background-color: rgba(25, 118, 210, 0.1) !important;
+  background-color: var(--table-row-hover) !important;
 }
 
 /* Styling for the actively selected list item in the navigation drawer. */
 .active-item {
-  background-color: rgba(25, 118, 210, 0.2) !important;
+  background-color: rgba(var(--primary-start), 0.2) !important;
 }
 
 /* --- User Menu Styling --- */
@@ -915,25 +1011,25 @@ export default {
 /* Styling for the main "Menu" button that activates the dropdown. */
 .user-menu-btn {
   text-transform: none;
-  padding: 4px 12px;
+  padding: var(--dynamic-xs) var(--dynamic-sm);
   font-weight: 500;
 }
 
 /* Styling for the card that contains the dropdown menu list. */
 .user-menu-card {
-  border-radius: 8px;
+  border-radius: var(--border-radius-md);
   overflow: hidden;
 }
 
 /* Padding for the list within the user menu card. */
 .user-menu-list {
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: var(--dynamic-xs);
+  padding-bottom: var(--dynamic-xs);
 }
 
 /* Padding for individual list items within the user menu. */
 .user-menu-item {
-  padding: 10px 16px;
+  padding: calc(var(--dynamic-xs) + 2px) var(--dynamic-md);
 }
 
 /* Minimum width for icons within user menu list items to ensure alignment. */
@@ -1344,6 +1440,20 @@ export default {
   background: linear-gradient(135deg, rgba(211, 47, 47, 0.05) 0%, rgba(244, 67, 54, 0.08) 100%) !important;
 }
 
+.warning-icon {
+  background: linear-gradient(135deg, #ff9800 0%, #ffc107 100%);
+  box-shadow: 0 2px 6px rgba(255, 152, 0, 0.2);
+}
+
+.warning-action:hover .warning-icon {
+  transform: scale(1.1) rotate(-5deg);
+  box-shadow: 0 3px 8px rgba(255, 152, 0, 0.25);
+}
+
+.warning-action:hover::before {
+  background: linear-gradient(135deg, rgba(255, 152, 0, 0.05) 0%, rgba(255, 193, 7, 0.08) 100%) !important;
+}
+
 /* Compact Responsive Design */
 @media (max-width: 768px) {
   .menu-card-compact {
@@ -1539,7 +1649,8 @@ export default {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding-right: 60px; /* Space for close button */
+  padding-right: 60px;
+  /* Space for close button */
 }
 
 .header-icon-wrapper-improved {
@@ -1714,17 +1825,17 @@ export default {
     margin: 16px;
     max-height: 85vh;
   }
-  
+
   .apps-grid-improved {
     grid-template-columns: 1fr;
     max-height: 300px;
   }
-  
+
   .header-content-improved {
     gap: 12px;
     padding-right: 50px;
   }
-  
+
   .content-container-improved {
     padding: 16px;
     max-height: 50vh;
@@ -1754,36 +1865,200 @@ export default {
   background: #a8a8a8;
 }
 
+/* Modern Theme Toggle Switch - Enhanced Size and Visibility */
+.modern-theme-toggle {
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+  touch-action: pan-x;
+  -webkit-tap-highlight-color: transparent;
+  margin: 0 12px;
+  display: flex;
+  align-items: center;
+}
+
+.toggle-track {
+  width: 64px;
+  /* Increased from 50px */
+  height: 32px;
+  /* Increased from 24px */
+  padding: 0;
+  border-radius: 30px;
+  background-color: #4D4D4D;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  position: relative;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  /* Added border for better visibility */
+}
+
+.toggle-track.dark-active {
+  background-color: #BB86FC;
+  border-color: rgba(255, 255, 255, 0.2);
+  /* Lighter border in dark mode */
+}
+
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 28px;
+  /* Increased from 20px */
+  height: 28px;
+  /* Increased from 20px */
+  border-radius: 50%;
+  background-color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  /* Enhanced shadow */
+  transition: all 0.25s ease;
+  z-index: 1;
+}
+
+.toggle-thumb.dark-active {
+  transform: translateX(32px);
+  /* Adjusted for new width */
+}
+
+.toggle-moon,
+.toggle-sun {
+  width: 24px;
+  /* Increased from 16px */
+  height: 24px;
+  /* Increased from 16px */
+  position: absolute;
+  top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.25s ease;
+}
+
+.toggle-moon {
+  right: 8px;
+  /* Adjusted position */
+  opacity: 0;
+  color: #fff;
+}
+
+.toggle-sun {
+  left: 8px;
+  /* Adjusted position */
+  opacity: 1;
+  color: #fff;
+}
+
+.toggle-track.dark-active .toggle-moon {
+  opacity: 1;
+}
+
+.toggle-track.dark-active .toggle-sun {
+  opacity: 0;
+}
+
+/* Add hover and focus effects */
+.modern-theme-toggle:hover .toggle-track {
+  background-color: #555;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.2);
+  /* Added glow effect on hover */
+}
+
+.modern-theme-toggle:hover .toggle-track.dark-active {
+  background-color: #9D6FE7;
+  box-shadow: 0 0 8px rgba(187, 134, 252, 0.4);
+  /* Purple glow in dark mode */
+}
+
+.modern-theme-toggle:focus-visible {
+  outline: 2px solid #BB86FC;
+  outline-offset: 2px;
+  border-radius: 30px;
+}
+
+/* Animation for the icons */
+.toggle-moon svg,
+.toggle-sun svg {
+  width: 20px;
+  /* Increased from default */
+  height: 20px;
+  /* Increased from default */
+  transition: transform 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.modern-theme-toggle:hover .toggle-moon svg,
+.modern-theme-toggle:hover .toggle-sun svg {
+  transform: rotate(12deg) scale(1.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .modern-theme-toggle {
+    width: 46px;
+    height: 24px;
+  }
+
+  .toggle-track {
+    width: 40px;
+    height: 20px;
+  }
+
+  .toggle-thumb {
+    width: 16px;
+    height: 16px;
+  }
+
+  .toggle-thumb.dark-active {
+    transform: translateX(18px);
+  }
+
+  .toggle-sun,
+  .toggle-moon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
 /* --- Dark Theme Adjustments --- */
 /* Navbar and Drawer styling when dark mode is active */
 :deep(.dark-theme) .navbar-enhanced,
 :deep(.v-theme--dark) .navbar-enhanced,
 ::v-deep(.dark-theme) .navbar-enhanced,
 ::v-deep(.v-theme--dark) .navbar-enhanced {
-  background-color: #1e1e1e !important;
+  background-color: var(--surface-primary) !important;
   background-image: none !important;
-  border-bottom-color: #333 !important;
-  color: #ffffff !important;
+  border-bottom-color: var(--divider) !important;
+  color: var(--text-primary) !important;
+}
+
+:deep(.dark-theme) .v-app-bar,
+:deep(.v-theme--dark) .v-app-bar {
+  background-color: var(--surface-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+:deep(.dark-theme) .v-app-bar .v-btn,
+:deep(.v-theme--dark) .v-app-bar .v-btn {
+  color: var(--text-primary) !important;
 }
 
 :deep(.dark-theme) .drawer-custom,
 :deep(.v-theme--dark) .drawer-custom,
 ::v-deep(.dark-theme) .drawer-custom,
 ::v-deep(.v-theme--dark) .drawer-custom {
-  background-color: #121212 !important;
+  background-color: var(--background) !important;
 }
 
 :deep(.dark-theme) .drawer-item-title,
 :deep(.v-theme--dark) .drawer-item-title,
 ::v-deep(.dark-theme) .drawer-item-title,
 ::v-deep(.v-theme--dark) .drawer-item-title {
-  color: #e0e0e0 !important;
+  color: var(--text-secondary) !important;
 }
 
 :deep(.dark-theme) .drawer-header .drawer-company,
 :deep(.v-theme--dark) .drawer-header .drawer-company,
 ::v-deep(.dark-theme) .drawer-header .drawer-company,
 ::v-deep(.v-theme--dark) .drawer-header .drawer-company {
-  color: #e0e0e0 !important;
+  color: var(--text-secondary) !important;
 }
 </style>

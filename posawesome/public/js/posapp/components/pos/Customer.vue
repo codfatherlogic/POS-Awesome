@@ -2,11 +2,12 @@
   <!-- ? Disable dropdown if either readonly or loadingCustomers is true -->
   <div class="customer-input-wrapper">
     <v-autocomplete ref="customerDropdown" class="customer-autocomplete sleek-field" density="compact" clearable
-      variant="solo" color="primary" :label="frappe._('Customer')" v-model="internalCustomer" :items="customers"
-      item-title="customer_name" item-value="name" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" :no-data-text="__('Customers not found')"
-      hide-details :customFilter="customFilter" :disabled="readonly || loadingCustomers"
-      :menu-props="{ closeOnContentClick: false }" @update:menu="onCustomerMenuToggle"
-      @update:modelValue="onCustomerChange" @keydown.enter="handleEnter">
+      variant="solo" color="primary" :label="frappe._('Customer')" v-model="internalCustomer" :items="filteredCustomers"
+      item-title="customer_name" item-value="name" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'"
+      :no-data-text="__('Customers not found')" hide-details :customFilter="() => true"
+      :disabled="readonly || loadingCustomers" :menu-props="{ closeOnContentClick: false }"
+      @update:menu="onCustomerMenuToggle" @update:modelValue="onCustomerChange" @update:search="onCustomerSearch"
+      @keydown.enter="handleEnter" :virtual-scroll="true" :virtual-scroll-item-height="48">
       <!-- Edit icon (left) -->
       <template #prepend-inner>
         <v-tooltip text="Edit customer">
@@ -130,7 +131,7 @@
 
 <script>
 import UpdateCustomer from './UpdateCustomer.vue';
-import { getCustomerStorage, setCustomerStorage } from '../../../offline.js';
+import { getCustomerStorage, setCustomerStorage } from '../../../offline/index.js';
 
 export default {
   props: {
@@ -146,7 +147,8 @@ export default {
     isMenuOpen: false,           // Tracks whether dropdown menu is open
     readonly: false,
     customer_info: {},           // Used for edit modal
-    loadingCustomers: false      // ? New state to track loading status
+    loadingCustomers: false,     // ? New state to track loading status
+    customerSearch: ''          // Search text
   }),
 
   components: {
@@ -156,6 +158,23 @@ export default {
   computed: {
     isDarkTheme() {
       return this.$theme.current === 'dark';
+    },
+
+    filteredCustomers() {
+      const search = this.customerSearch.toLowerCase();
+      let results = this.customers;
+      if (search) {
+        results = results.filter(cust => {
+          return (
+            (cust.customer_name && cust.customer_name.toLowerCase().includes(search)) ||
+            (cust.tax_id && cust.tax_id.toLowerCase().includes(search)) ||
+            (cust.email_id && cust.email_id.toLowerCase().includes(search)) ||
+            (cust.mobile_no && cust.mobile_no.toLowerCase().includes(search)) ||
+            (cust.name && cust.name.toLowerCase().includes(search))
+          );
+        });
+      }
+      return results;
     }
   },
 
@@ -198,6 +217,10 @@ export default {
       }
     },
 
+    onCustomerSearch(val) {
+      this.customerSearch = val || '';
+    },
+
     // Pressing Enter in input
     handleEnter(event) {
       const inputText = event.target.value?.toLowerCase() || '';
@@ -236,7 +259,7 @@ export default {
 
       this.loadingCustomers = true; // ? Start loading
       frappe.call({
-        method: 'posawesome.posawesome.api.posapp.get_customer_names',
+        method: 'posawesome.posawesome.api.customers.get_customer_names',
         args: {
           pos_profile: this.pos_profile.pos_profile,
         },
@@ -263,19 +286,6 @@ export default {
 
     edit_customer() {
       this.eventBus.emit('open_update_customer', this.customer_info);
-    },
-
-    customFilter(itemText, queryText, itemRow) {
-      const item = itemRow.raw;
-      const searchText = queryText.toLowerCase();
-
-      return (
-        (item.customer_name?.toLowerCase().includes(searchText)) ||
-        (item.tax_id?.toLowerCase().includes(searchText)) ||
-        (item.email_id?.toLowerCase().includes(searchText)) ||
-        (item.mobile_no?.toLowerCase().includes(searchText)) ||
-        (item.name?.toLowerCase().includes(searchText))
-      );
     },
   },
 

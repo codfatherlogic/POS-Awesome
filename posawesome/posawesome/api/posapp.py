@@ -140,16 +140,46 @@ def update_opening_shift_data(data, pos_profile):
 
 @frappe.whitelist()
 def get_items(
-    pos_profile, price_list=None, item_group="", search_value="", customer=None
+    pos_profile,
+    price_list=None,
+    item_group="",
+    search_value="",
+    customer=None,
+    limit=None,
+    offset=None,
 ):
     _pos_profile = json.loads(pos_profile)
     use_price_list = _pos_profile.get("posa_use_server_cache")
 
     @redis_cache(ttl=60)
-    def __get_items(pos_profile, price_list, item_group, search_value, customer=None):
-        return _get_items(pos_profile, price_list, item_group, search_value, customer)
+    def __get_items(
+        pos_profile,
+        price_list,
+        item_group,
+        search_value,
+        customer=None,
+        limit=None,
+        offset=None,
+    ):
+        return _get_items(
+            pos_profile,
+            price_list,
+            item_group,
+            search_value,
+            customer,
+            limit,
+            offset,
+        )
 
-    def _get_items(pos_profile, price_list, item_group, search_value, customer=None):
+    def _get_items(
+        pos_profile,
+        price_list,
+        item_group,
+        search_value,
+        customer=None,
+        limit=None,
+        offset=None,
+    ):
         pos_profile = json.loads(pos_profile)
         condition = ""
         
@@ -174,11 +204,27 @@ def get_items(
         if not price_list:
             price_list = pos_profile.get("selling_price_list")
 
-        limit = ""
+        limit_clause = ""
+
+        def _to_positive_int(value):
+            """Convert the input to a non-negative integer if possible."""
+            try:
+                ivalue = int(value)
+                return ivalue if ivalue >= 0 else None
+            except (TypeError, ValueError):
+                return None
+
+        limit = _to_positive_int(limit)
+        offset = _to_positive_int(offset)
+
+        if limit is not None:
+            limit_clause = f" LIMIT {limit}"
+            if offset:
+                limit_clause += f" OFFSET {offset}"
 
         condition += get_item_group_condition(pos_profile.get("name"))
 
-        if use_limit_search:
+        if use_limit_search and limit is None:
             search_limit = pos_profile.get("posa_search_limit") or 500
             data = {}
             if search_value:
@@ -195,58 +241,109 @@ def get_items(
                 item_code, serial_no, batch_no, barcode
             )
             if item_group:
-                condition += " AND item_group like '%{item_group}%'".format(
-                    item_group=item_group
+                # Escape item_group to avoid SQL errors with special characters
+                safe_item_group = frappe.db.escape("%" + item_group + "%")
+                condition += " AND item_group like {item_group}".format(
+                    item_group=safe_item_group
                 )
-            limit = " LIMIT {search_limit}".format(search_limit=search_limit)
+
+            # Always apply a search limit when limit search is enabled
+            limit_clause = " LIMIT {search_limit}".format(search_limit=search_limit)
+
+            # If force reload is enabled and the user is explicitly searching,
+            # remove the limit to return all matching items
+            if pos_profile.get("posa_force_reload_items") and search_value:
+                limit_clause = ""
 
         if not posa_show_template_items:
             condition += " AND has_variants = 0"
 
         result = []
 
-        items_data = frappe.db.sql(
-            """
-            SELECT
-                name AS item_code,
-                item_name,
-                description,
-                stock_uom,
-                image,
-                is_stock_item,
-                has_variants,
-                variant_of,
-                item_group,
-                idx as idx,
-                has_batch_no,
-                has_serial_no,
-                max_discount,
-                brand
-            FROM
-                `tabItem`
-            WHERE
-                disabled = 0
-                    AND is_sales_item = 1
-                    AND is_fixed_asset = 0
-                    {condition}
-            ORDER BY
-                item_name asc
-            {limit}
-                """.format(
-                condition=condition, limit=limit
-            ),
-            as_dict=1,
+        # Build ORM filters
+        filters = {
+            "disabled": 0,
+            "is_sales_item": 1,
+            "is_fixed_asset": 0
+        }
+        
+        # Add item group filter
+        item_groups = get_item_groups(pos_profile.get("name"))
+        if item_groups:
+            filters["item_group"] = ["in", item_groups]
+        
+        # Add search conditions
+        or_filters = []
+        if use_limit_search and search_value:
+            data = search_serial_or_batch_or_barcode_number(
+                search_value, search_serial_no
+            )
+            item_code = data.get("item_code") if data.get("item_code") else search_value
+            
+            or_filters = [
+                ["name", "like", f"%{item_code}%"],
+                ["item_name", "like", f"%{item_code}%"]
+            ]
+            
+            # Check for exact barcode match
+            if data.get("item_code"):
+                filters["name"] = data.get("item_code")
+                or_filters = []
+        
+        if item_group:
+            filters["item_group"] = ["like", f"%{item_group}%"]
+        
+        if not posa_show_template_items:
+            filters["has_variants"] = 0
+        
+        # Determine limit
+        limit_page_length = None
+        limit_start = None
+        
+        if limit is not None:
+            limit_page_length = limit
+            if offset:
+                limit_start = offset
+        elif use_limit_search:
+            limit_page_length = search_limit
+            if pos_profile.get("posa_force_reload_items") and search_value:
+                limit_page_length = None
+        
+        items_data = frappe.get_all(
+            "Item",
+            filters=filters,
+            or_filters=or_filters if or_filters else None,
+            fields=[
+                "name as item_code",
+                "item_name",
+                "description", 
+                "stock_uom",
+                "image",
+                "is_stock_item",
+                "has_variants",
+                "variant_of",
+                "item_group",
+                "idx",
+                "has_batch_no",
+                "has_serial_no",
+                "max_discount",
+                "brand"
+            ],
+            limit_start=limit_start,
+            limit_page_length=limit_page_length,
+            order_by="item_name asc"
         )
 
         if items_data:
             items = [d.item_code for d in items_data]
+            price_list_currency = frappe.db.get_value("Price List", price_list, "currency")
             item_prices_data = frappe.get_all(
                 "Item Price",
                 fields=["item_code", "price_list_rate", "currency", "uom"],
                 filters={
                     "price_list": price_list,
                     "item_code": ["in", items],
-                    "currency": pos_profile.get("currency"),
+                    "currency": price_list_currency or pos_profile.get("currency"),
                     "selling": 1,
                     "valid_from": ["<=", today],
                     "customer": ["in", ["", None, customer]],
@@ -310,6 +407,15 @@ def get_items(
                         },
                         fields=["name as serial_no"],
                     )
+                # Fetch UOM conversion details for the item
+                uoms = frappe.get_all(
+                    "UOM Conversion Detail",
+                    filters={"parent": item_code},
+                    fields=["uom", "conversion_factor"],
+                )
+                stock_uom = item.stock_uom
+                if stock_uom and not any(u.get("uom") == stock_uom for u in uoms):
+                    uoms.append({"uom": stock_uom, "conversion_factor": 1.0})
                 item_stock_qty = 0
                 if pos_profile.get("posa_display_items_in_stock") or use_limit_search:
                     item_stock_qty = get_stock_availability(
@@ -336,6 +442,7 @@ def get_items(
                         {
                             "rate": item_price.get("price_list_rate") or 0,
                             "currency": item_price.get("currency")
+                            or price_list_currency
                             or pos_profile.get("currency"),
                             "item_barcode": item_barcode or [],
                             "actual_qty": item_stock_qty or 0,
@@ -343,15 +450,32 @@ def get_items(
                             "batch_no_data": batch_no_data or [],
                             "attributes": attributes or "",
                             "item_attributes": item_attributes or "",
+                            "item_uoms": uoms or [],
                         }
                     )
                     result.append(row)
         return result
 
     if use_price_list:
-        return __get_items(pos_profile, price_list, item_group, search_value, customer)
+        return __get_items(
+            pos_profile,
+            price_list,
+            item_group,
+            search_value,
+            customer,
+            limit,
+            offset,
+        )
     else:
-        return _get_items(pos_profile, price_list, item_group, search_value, customer)
+        return _get_items(
+            pos_profile,
+            price_list,
+            item_group,
+            search_value,
+            customer,
+            limit,
+            offset,
+        )
 
 
 def get_item_group_condition(pos_profile):
@@ -378,14 +502,12 @@ def get_root_of(doctype):
 
 @frappe.whitelist()
 def get_items_groups():
-    return frappe.db.sql(
-        """
-        select name 
-        from `tabItem Group`
-        where is_group = 0
-        order by name
-        LIMIT 0, 200 """,
-        as_dict=1,
+    return frappe.get_all(
+        "Item Group",
+        filters={"is_group": 0},
+        fields=["name"],
+        limit_page_length=200,
+        order_by="name"
     )
 
 
@@ -408,12 +530,14 @@ def get_customer_groups(pos_profile):
 
 def get_child_nodes(group_type, root):
     lft, rgt = frappe.db.get_value(group_type, root, ["lft", "rgt"])
-    return frappe.db.sql(
-        """ Select name, lft, rgt from `tab{tab}` where
-			lft >= {lft} and rgt <= {rgt} order by lft""".format(
-            tab=group_type, lft=lft, rgt=rgt
-        ),
-        as_dict=1,
+    return frappe.get_all(
+        group_type,
+        filters={
+            "lft": [">=", lft],
+            "rgt": ["<=", rgt]
+        },
+        fields=["name", "lft", "rgt"],
+        order_by="lft"
     )
 
 
@@ -439,18 +563,17 @@ def get_customer_names(pos_profile):
 
     def _get_customer_names(pos_profile):
         pos_profile = json.loads(pos_profile)
-        condition = ""
-        condition += get_customer_group_condition(pos_profile)
-        customers = frappe.db.sql(
-            """
-            SELECT name, mobile_no, email_id, tax_id, customer_name, primary_address
-            FROM `tabCustomer`
-            WHERE {0}
-            ORDER by name
-            """.format(
-                condition
-            ),
-            as_dict=1,
+        filters = {"disabled": 0}
+        
+        customer_groups = get_customer_groups(pos_profile)
+        if customer_groups:
+            filters["customer_group"] = ["in", customer_groups]
+        
+        customers = frappe.get_all(
+            "Customer",
+            filters=filters,
+            fields=["name", "mobile_no", "email_id", "tax_id", "customer_name", "primary_address"],
+            order_by="name"
         )
         return customers
 
@@ -573,15 +696,31 @@ def update_invoice(data):
         # Get default conversion rate from ERPNext if currency is different from company currency
         if invoice_doc.currency != frappe.get_cached_value("Company", invoice_doc.company, "default_currency"):
             company_currency = frappe.get_cached_value("Company", invoice_doc.company, "default_currency")
-            # Get exchange rate from selected currency to base currency
-            exchange_rate = get_exchange_rate(
-                invoice_doc.currency,
-                company_currency,
-                invoice_doc.posting_date
-            )
+
+            exchange_rate = None
+            if invoice_doc.selling_price_list:
+                try:
+                    exchange_rate = frappe.db.get_value(
+                        "Price List",
+                        invoice_doc.selling_price_list,
+                        "exchange_rate",
+                    )
+                except Exception:
+                    exchange_rate = None
+
+            if not exchange_rate:
+                # Get exchange rate from selected currency to base currency
+                exchange_rate = get_exchange_rate(
+                    invoice_doc.currency,
+                    company_currency,
+                    invoice_doc.posting_date,
+                )
             invoice_doc.conversion_rate = exchange_rate
             invoice_doc.plc_conversion_rate = exchange_rate
-            invoice_doc.price_list_currency = selected_currency
+
+            # Preserve provided price list currency if different from selected
+            price_list_currency = data.get("price_list_currency") or selected_currency
+            invoice_doc.price_list_currency = price_list_currency
 
             # Update rates and amounts for all items using multiplication
             for item in invoice_doc.items:
@@ -1010,22 +1149,47 @@ def delete_invoice(invoice):
 
 
 @frappe.whitelist()
-def get_items_details(pos_profile, items_data):
+def get_items_details(pos_profile, items_data, price_list=None):
     _pos_profile = json.loads(pos_profile)
     ttl = _pos_profile.get("posa_server_cache_duration")
     if ttl:
         ttl = int(ttl) * 60
 
     @redis_cache(ttl=ttl or 1800)
-    def __get_items_details(pos_profile, items_data):
-        return _get_items_details(pos_profile, items_data)
+    def __get_items_details(pos_profile, items_data, price_list=None):
+        return _get_items_details(pos_profile, items_data, price_list)
 
-    def _get_items_details(pos_profile, items_data):
+    def _get_items_details(pos_profile, items_data, price_list=None):
         today = nowdate()
         pos_profile = json.loads(pos_profile)
         items_data = json.loads(items_data)
         warehouse = pos_profile.get("warehouse")
         result = []
+
+        if not price_list:
+            price_list = pos_profile.get("selling_price_list")
+
+        item_codes = [item.get("item_code") for item in items_data]
+
+        price_list_currency = frappe.db.get_value("Price List", price_list, "currency")
+        item_prices_data = frappe.get_all(
+            "Item Price",
+            fields=["item_code", "price_list_rate", "currency", "uom"],
+            filters={
+                "price_list": price_list,
+                "item_code": ["in", item_codes],
+                "currency": price_list_currency or pos_profile.get("currency"),
+                "selling": 1,
+                "valid_from": ["<=", today],
+            },
+            or_filters=[["valid_upto", ">=", today], ["valid_upto", "in", ["", None]]],
+            order_by="valid_from ASC, valid_upto DESC",
+        )
+
+        item_prices = {}
+        for d in item_prices_data:
+            item_prices.setdefault(d.item_code, {})
+            item_prices[d.item_code][d.get("uom") or "None"] = d
 
         # Clear quantity cache once per request instead of each item
         try:
@@ -1039,7 +1203,7 @@ def get_items_details(pos_profile, items_data):
         if len(items_data) > 0:
             for item in items_data:
                 item_code = item.get("item_code")
-                
+
                 item_stock_qty = get_stock_availability(item_code, warehouse)
                 (has_batch_no, has_serial_no) = frappe.db.get_value(
                     "Item", item_code, ["has_batch_no", "has_serial_no"]
@@ -1094,6 +1258,14 @@ def get_items_details(pos_profile, items_data):
                                     }
                                 )
 
+                item_price = {}
+                if item_prices.get(item_code):
+                    item_price = (
+                        item_prices.get(item_code).get(stock_uom)
+                        or item_prices.get(item_code).get("None")
+                        or {}
+                    )
+
                 row = {}
                 row.update(item)
                 row.update(
@@ -1104,6 +1276,11 @@ def get_items_details(pos_profile, items_data):
                         "actual_qty": item_stock_qty or 0,
                         "has_batch_no": has_batch_no,
                         "has_serial_no": has_serial_no,
+                        "rate": item_price.get("price_list_rate") or 0,
+                        "price_list_rate": item_price.get("price_list_rate") or 0,
+                        "currency": item_price.get("currency")
+                        or price_list_currency
+                        or pos_profile.get("currency"),
                     }
                 )
 
@@ -1112,9 +1289,9 @@ def get_items_details(pos_profile, items_data):
         return result
 
     if _pos_profile.get("posa_use_server_cache"):
-        return __get_items_details(pos_profile, items_data)
+        return __get_items_details(pos_profile, items_data, price_list)
     else:
-        return _get_items_details(pos_profile, items_data)
+        return _get_items_details(pos_profile, items_data, price_list)
 
 
 @frappe.whitelist()
@@ -2219,8 +2396,13 @@ def search_serial_or_batch_or_barcode_number(search_value, search_serial_no):
 
 
 def get_seearch_items_conditions(item_code, serial_no, batch_no, barcode):
+    """Build item search conditions safely."""
+    # Gracefully handle missing item_code values to avoid TypeErrors
+    item_code = item_code or ""
+
     if serial_no or batch_no or barcode:
         return " and name = {0}".format(frappe.db.escape(item_code))
+
     return """ and (name like {item_code} or item_name like {item_code})""".format(
         item_code=frappe.db.escape("%" + item_code + "%")
     )

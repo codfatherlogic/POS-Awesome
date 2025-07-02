@@ -1,13 +1,13 @@
 <template>
   <div class="my-0 py-0 overflow-y-auto" :style="{ height: 'calc(var(--container-height) - 80px)', maxHeight: 'calc(var(--container-height) - 80px)' }">
-    <v-data-table
+    <v-data-table-virtual
       :headers="headers"
       :items="items"
       :theme="$theme.current"
       :expanded="expanded"
       show-expand
       item-value="posa_row_id"
-      class="enhanced-table-items elevation-2"
+      class="modern-items-table elevation-2"
       :items-per-page="itemsPerPage"
       expand-on-click
       density="compact"
@@ -17,8 +17,9 @@
       @update:expanded="$emit('update:expanded', $event)"
       :search="itemSearch"
     >
+      <!-- Custom cell renderers for numeric values with proper alignment -->
       <template v-slot:item.qty="{ item }">
-        <div class="amount-value">{{ formatFloat(item.qty) }}</div>
+        <div class="amount-value">{{ formatFloat(item.qty, hide_qty_decimals ? 0 : undefined) }}</div>
       </template>
 
       <template v-slot:item.rate="{ item }">
@@ -36,12 +37,15 @@
       </template>
 
       <template v-slot:item.discount_value="{ item }">
-        <div v-if="item.discount_percentage" class="amount-value">
-          {{ formatFloat(item.discount_percentage) }}%
+        <div class="amount-value">
+          {{ formatFloat(item.discount_percentage || (item.price_list_rate ? (item.discount_amount / item.price_list_rate) * 100 : 0)) }}%
         </div>
-        <div v-else class="currency-display">
+      </template>
+
+      <template v-slot:item.discount_amount="{ item }">
+        <div class="currency-display">
           <span class="currency-symbol">{{ currencySymbol(displayCurrency) }}</span>
-          <span class="amount-value">{{ formatCurrency(item.discount_amount) }}</span>
+          <span class="amount-value">{{ formatCurrency(item.discount_amount || 0) }}</span>
         </div>
       </template>
 
@@ -56,166 +60,197 @@
         <v-checkbox-btn v-model="item.posa_is_offer" class="center" @change="toggleOffer(item)"></v-checkbox-btn>
       </template>
 
+      <!-- Enhanced expandable row with modern design -->
       <template v-slot:expanded-row="{ columns: headers, item }">
-        <td :colspan="headers.length" class="ma-0 pa-2">
-          <v-row class="mb-3" dense>
-            <v-col cols="auto">
-              <v-btn :disabled="!!item.posa_is_replace" icon="mdi-trash-can-outline" size="large" color="error"
-                variant="tonal" class="item-action-btn delete-btn mr-2" @click.stop="removeItem(item)">
-                <v-icon size="large">mdi-trash-can-outline</v-icon>
-              </v-btn>
-            </v-col>
-            <v-spacer></v-spacer>
-            <v-col cols="auto">
-              <v-btn :disabled="!!item.posa_is_replace" size="large" color="error" variant="tonal"
-                class="item-action-btn minus-btn mr-2" @click.stop="subtractOne(item)">
-                <v-icon size="large">mdi-minus-circle-outline</v-icon>
-              </v-btn>
-              <v-btn :disabled="!!item.posa_is_replace" size="large" color="success" variant="tonal"
-                class="item-action-btn plus-btn ml-2" @click.stop="addOne(item)">
-                <v-icon size="large">mdi-plus-circle-outline</v-icon>
-              </v-btn>
-            </v-col>
-          </v-row>
+        <td :colspan="headers.length" class="ma-0 pa-0">
+          <div class="expanded-content">
+            <!-- Action buttons with improved layout and visual feedback -->
+            <div class="action-panel">
+              <div class="action-button-group">
+                <v-btn :disabled="!!item.posa_is_replace" icon="mdi-trash-can-outline" size="large" color="error"
+                  variant="tonal" class="item-action-btn delete-btn" @click.stop="removeItem(item)">
+                  <v-icon size="large">mdi-trash-can-outline</v-icon>
+                  <span class="action-label">{{ __('Remove') }}</span>
+                </v-btn>
+              </div>
+              
+              <div class="action-button-group">
+                <v-btn :disabled="!!item.posa_is_replace" size="large" color="warning" variant="tonal"
+                  class="item-action-btn minus-btn" @click.stop="subtractOne(item)">
+                  <v-icon size="large">mdi-minus-circle-outline</v-icon>
+                  <span class="action-label">{{ __('Decrease') }}</span>
+                </v-btn>
+                <v-btn :disabled="!!item.posa_is_replace" size="large" color="success" variant="tonal"
+                  class="item-action-btn plus-btn" @click.stop="addOne(item)">
+                  <v-icon size="large">mdi-plus-circle-outline</v-icon>
+                  <span class="action-label">{{ __('Increase') }}</span>
+                </v-btn>
+              </div>
+            </div>
 
-          <v-row dense class="item-details-form mb-2">
-            <v-col cols="12" sm="4" class="field-with-icon">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Item Code')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details v-model="item.item_code" disabled
-                prepend-inner-icon="mdi-barcode"></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4" class="field-with-icon">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('QTY')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :model-value="formatFloat(item.qty)" @change="[
-                  setFormatedQty(item, 'qty', null, false, $event.target.value),
-                  calcStockQty(item, item.qty),
-                ]" :rules="[isNumber]" :disabled="!!item.posa_is_replace"
-                prepend-inner-icon="mdi-numeric"></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4" class="field-with-icon">
-              <v-select density="compact" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" :label="frappe._('UOM')" v-model="item.uom"
-                :items="item.item_uoms" variant="outlined" item-title="uom" item-value="uom" hide-details
-                @update:model-value="calcUom(item, $event)"
-                :disabled="!!item.posa_is_replace || (isReturnInvoice && invoice_doc.return_against)"
-                prepend-inner-icon="mdi-weight"></v-select>
-            </v-col>
+            <!-- Item details form with improved layout -->
+            <div class="item-details-form">
+              <!-- First row of fields -->
+              <div class="form-row">
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Item Code')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details v-model="item.item_code" disabled
+                    prepend-inner-icon="mdi-barcode"></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('QTY')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :model-value="formatFloat(item.qty, hide_qty_decimals ? 0 : undefined)" @change="[
+                      setFormatedQty(item, 'qty', null, false, $event.target.value),
+                      calcStockQty(item, item.qty),
+                    ]" :rules="[isNumber]" :disabled="!!item.posa_is_replace"
+                    prepend-inner-icon="mdi-numeric"></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-select density="compact" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" :label="frappe._('UOM')" v-model="item.uom"
+                    :items="item.item_uoms" variant="outlined" item-title="uom" item-value="uom" hide-details
+                    @update:model-value="calcUom(item, $event)"
+                    :disabled="!!item.posa_is_replace || (isReturnInvoice && invoice_doc.return_against)"
+                    prepend-inner-icon="mdi-weight"></v-select>
+                </div>
+              </div>
 
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Rate')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :prefix="currencySymbol(pos_profile.currency)"
-                :model-value="formatCurrency(item.rate)" @change="[
-                  setFormatedCurrency(item, 'rate', null, false, $event),
-                  calcPrices(item, $event.target.value, $event),
-                ]" :rules="[isNumber]" id="rate" :disabled="!!item.posa_is_replace ||
-                  !!item.posa_offer_applied ||
-                  !pos_profile.posa_allow_user_to_edit_rate ||
-                  (isReturnInvoice && invoice_doc.return_against)"></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Discount %')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :model-value="formatFloat(item.discount_percentage)" @change="[
-                  setFormatedCurrency(item, 'discount_percentage', null, true, $event),
-                  calcPrices(item, $event.target.value, $event),
-                ]" :rules="[isNumber]" id="discount_percentage" :disabled="!!item.posa_is_replace ||
-                  item.posa_offer_applied ||
-                  !pos_profile.posa_allow_user_to_edit_item_discount ||
-                  (isReturnInvoice && invoice_doc.return_against)" suffix="%"></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary"
-                :label="frappe._('Discount Amount')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
-                :model-value="formatCurrency(item.discount_amount || 0)" ref="discount"
-                @change="(event) => { if (expanded && expanded.length === 1 && expanded[0] === item.posa_row_id) { calcPrices(item, event.target.value, { target: { id: 'discount_amount' } }); } }"
-                :rules="['isNumber']" id="discount_amount"
-                :disabled="!!item.posa_is_replace || item.posa_offer_applied || !pos_profile.posa_allow_user_to_edit_item_discount || (isReturnInvoice && invoice_doc.return_against)"
-                :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
-            </v-col>
+              <!-- Second row of fields -->
+              <div class="form-row">
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Rate')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :prefix="currencySymbol(displayCurrency)"
+                    :model-value="formatCurrency(item.rate)" @change="[
+                      setFormatedCurrency(item, 'rate', null, false, $event),
+                      calcPrices(item, $event.target.value, $event),
+                    ]" :rules="[isNumber]" id="rate" :disabled="!!item.posa_is_replace ||
+                      !!item.posa_offer_applied ||
+                      !pos_profile.posa_allow_user_to_edit_rate ||
+                      (isReturnInvoice && invoice_doc.return_against)"></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Discount %')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :model-value="formatFloat(item.discount_percentage)" @change="[
+                      setFormatedCurrency(item, 'discount_percentage', null, true, $event),
+                      calcPrices(item, $event.target.value, $event),
+                    ]" :rules="[isNumber]" id="discount_percentage" :disabled="!!item.posa_is_replace ||
+                      item.posa_offer_applied ||
+                      !pos_profile.posa_allow_user_to_edit_item_discount ||
+                      (isReturnInvoice && invoice_doc.return_against)" suffix="%"></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary"
+                    :label="frappe._('Discount Amount')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
+                    :model-value="formatCurrency(item.discount_amount || 0)" ref="discount"
+                    @change="(event) => { if (expanded && expanded.length === 1 && expanded[0] === item.posa_row_id) { calcPrices(item, event.target.value, { target: { id: 'discount_amount' } }); } }"
+                    :rules="['isNumber']" id="discount_amount"
+                    :disabled="!!item.posa_is_replace || item.posa_offer_applied || !pos_profile.posa_allow_user_to_edit_item_discount || (isReturnInvoice && invoice_doc.return_against)"
+                    :prefix="currencySymbol(displayCurrency)"></v-text-field>
+                </div>
+              </div>
 
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary"
-                :label="frappe._('Price list Rate')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
-                :model-value="formatCurrency(item.price_list_rate)" disabled
-                :prefix="currencySymbol(pos_profile.currency)"></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary"
-                :label="frappe._('Available QTY')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
-                :model-value="formatFloat(item.actual_qty)" disabled></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Group')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details v-model="item.item_group" disabled></v-text-field>
-            </v-col>
+              <!-- Third row of fields -->
+              <div class="form-row">
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary"
+                    :label="frappe._('Price list Rate')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
+                    :model-value="formatCurrency(item.price_list_rate)" disabled
+                    :prefix="currencySymbol(displayCurrency)"></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary"
+                    :label="frappe._('Available QTY')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
+                    :model-value="formatFloat(item.actual_qty, hide_qty_decimals ? 0 : undefined)" disabled></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Group')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details v-model="item.item_group" disabled></v-text-field>
+                </div>
+              </div>
 
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Stock QTY')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :model-value="formatFloat(item.stock_qty)" disabled></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4">
-              <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Stock UOM')"
-                :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details v-model="item.stock_uom" disabled></v-text-field>
-            </v-col>
-            <v-col cols="12" sm="4" v-if="item.posa_offer_applied">
-              <v-checkbox density="compact" :label="frappe._('Offer Applied')" v-model="item.posa_offer_applied"
-                readonly hide-details class="mt-1"></v-checkbox>
-            </v-col>
+              <!-- Fourth row of fields -->
+              <div class="form-row">
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Stock QTY')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details :model-value="formatFloat(item.stock_qty)" disabled></v-text-field>
+                </div>
+                <div class="form-field">
+                  <v-text-field density="compact" variant="outlined" color="primary" :label="frappe._('Stock UOM')"
+                    :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details v-model="item.stock_uom" disabled></v-text-field>
+                </div>
+                <div class="form-field" v-if="item.posa_offer_applied">
+                  <v-checkbox density="compact" :label="frappe._('Offer Applied')" v-model="item.posa_offer_applied"
+                    readonly hide-details class="mt-1"></v-checkbox>
+                </div>
+              </div>
 
-            <template v-if="item.has_serial_no == 1 || item.serial_no">
-              <v-col cols="12" sm="4">
-                <v-text-field density="compact" variant="outlined" color="primary"
-                  :label="frappe._('Serial No QTY')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
-                  v-model="item.serial_no_selected_count" type="number" disabled></v-text-field>
-              </v-col>
-              <v-col cols="12">
-                <v-autocomplete v-model="item.serial_no_selected" :items="item.serial_no_data"
-                  item-title="serial_no" variant="outlined" density="compact" chips color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field"
-                  :label="frappe._('Serial No')" multiple
-                  @update:model-value="setSerialNo(item)"></v-autocomplete>
-              </v-col>
-            </template>
+              <!-- Serial Number Section -->
+              <div class="form-section" v-if="item.has_serial_no == 1 || item.serial_no">
+                <div class="form-row">
+                  <div class="form-field">
+                    <v-text-field density="compact" variant="outlined" color="primary"
+                      :label="frappe._('Serial No QTY')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
+                      v-model="item.serial_no_selected_count" type="number" disabled></v-text-field>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-field full-width">
+                    <v-autocomplete v-model="item.serial_no_selected" :items="item.serial_no_data"
+                      item-title="serial_no" variant="outlined" density="compact" chips color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field"
+                      :label="frappe._('Serial No')" multiple
+                      @update:model-value="setSerialNo(item)"></v-autocomplete>
+                  </div>
+                </div>
+              </div>
 
-            <template v-if="item.has_batch_no == 1 || item.batch_no">
-              <v-col cols="12" sm="4">
-                <v-text-field density="compact" variant="outlined" color="primary"
-                  :label="frappe._('Batch No. Available QTY')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
-                  :model-value="formatFloat(item.actual_batch_qty)" disabled></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="4">
-                <v-text-field density="compact" variant="outlined" color="primary"
-                  :label="frappe._('Batch No Expiry Date')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
-                  v-model="item.batch_no_expiry_date" disabled></v-text-field>
-              </v-col>
-              <v-col cols="12" sm="4">
-                <v-autocomplete v-model="item.batch_no" :items="item.batch_no_data" item-title="batch_no"
-                  variant="outlined" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" :label="frappe._('Batch No')"
-                  @update:model-value="setBatchQty(item, $event)" hide-details>
-                  <template v-slot:item="{ props, item }">
-                    <v-list-item v-bind="props">
-                      <!-- eslint-disable-next-line vue/no-v-text-v-html-on-component -->
-                      <v-list-item-title v-html="item.raw.batch_no"></v-list-item-title>
-                      <!-- eslint-disable-next-line vue/no-v-text-v-html-on-component -->
-                      <v-list-item-subtitle v-html="`Available QTY  '${item.raw.batch_qty}' - Expiry Date ${item.raw.expiry_date}`"></v-list-item-subtitle>
-                    </v-list-item>
-                  </template>
-                </v-autocomplete>
-              </v-col>
-            </template>
+              <!-- Batch Number Section -->
+              <div class="form-section" v-if="item.has_batch_no == 1 || item.batch_no">
+                <div class="form-row">
+                  <div class="form-field">
+                    <v-text-field density="compact" variant="outlined" color="primary"
+                      :label="frappe._('Batch No. Available QTY')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
+                      :model-value="formatFloat(item.actual_batch_qty, hide_qty_decimals ? 0 : undefined)" disabled></v-text-field>
+                  </div>
+                  <div class="form-field">
+                    <v-text-field density="compact" variant="outlined" color="primary"
+                      :label="frappe._('Batch No Expiry Date')" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" hide-details
+                      v-model="item.batch_no_expiry_date" disabled></v-text-field>
+                  </div>
+                  <div class="form-field">
+                    <v-autocomplete v-model="item.batch_no" :items="item.batch_no_data" item-title="batch_no"
+                      variant="outlined" density="compact" color="primary" :bg-color="isDarkTheme ? '#1E1E1E' : 'white'" class="dark-field" :label="frappe._('Batch No')"
+                      @update:model-value="setBatchQty(item, $event)" hide-details>
+                      <template v-slot:item="{ props, item }">
+                        <v-list-item v-bind="props">
+                          <v-list-item-title v-html="item.raw.batch_no"></v-list-item-title>
+                          <v-list-item-subtitle v-html="`Available QTY  '${item.raw.batch_qty}' - Expiry Date ${item.raw.expiry_date}`"></v-list-item-subtitle>
+                        </v-list-item>
+                      </template>
+                    </v-autocomplete>
+                  </div>
+                </div>
+              </div>
 
-            <v-col cols="12" sm="4" v-if="pos_profile.posa_allow_sales_order && invoiceType == 'Order'">
-              <VueDatePicker
-                v-model="item.posa_delivery_date"
-                model-type="format"
-                format="dd-MM-yyyy"
-                :min-date="new Date()"
-                auto-apply
-                :dark="isDarkTheme"
-                @update:model-value="validateDueDate(item)"
-              />
-            </v-col>
-          </v-row>
+              <!-- Delivery Date Section -->
+              <div class="form-section" v-if="pos_profile.posa_allow_sales_order && invoiceType == 'Order'">
+                <div class="form-row">
+                  <div class="form-field">
+                    <VueDatePicker
+                      v-model="item.posa_delivery_date"
+                      model-type="format"
+                      format="dd-MM-yyyy"
+                      :min-date="new Date()"
+                      auto-apply
+                      :dark="isDarkTheme"
+                      @update:model-value="validateDueDate(item)"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </td>
       </template>
-    </v-data-table>
+    </v-data-table-virtual>
   </div>
 </template>
 
@@ -259,160 +294,143 @@ export default {
     isDarkTheme() {
       return this.$theme.current === 'dark';
     },
+    hide_qty_decimals() {
+      try {
+        const saved = localStorage.getItem('posawesome_item_selector_settings');
+        if (saved) {
+          const opts = JSON.parse(saved);
+          return !!opts.hide_qty_decimals;
+        }
+      } catch (e) {
+        console.error('Failed to load item selector settings:', e);
+      }
+      return false;
+    },
   },
 };
 </script>
 
-<style scoped>
-.enhanced-table-items {
-  border-radius: 12px;
+<style>
+/* Modern table styling with enhanced visual hierarchy */
+.modern-items-table {
+  border-radius: var(--border-radius-lg);
   overflow: hidden;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-md);
   border: 1px solid rgba(0, 0, 0, 0.09);
-  margin-bottom: 16px;
   height: 100%;
   display: flex;
   flex-direction: column;
+  transition: all 0.3s ease;
 }
 
-.enhanced-table-items :deep(.v-data-table__wrapper),
-.enhanced-table-items :deep(.v-table__wrapper) {
-  border-radius: 8px;
+/* Table wrapper styling */
+.modern-items-table :deep(.v-data-table__wrapper),
+.modern-items-table :deep(.v-table__wrapper) {
+  border-radius: var(--border-radius-sm);
   height: 100%;
   overflow-y: auto;
+  scrollbar-width: thin;
 }
 
-.enhanced-table-items :deep(th) {
-  background: #ffffff;
-  color: #424242;
+/* Table header styling */
+.modern-items-table :deep(th) {
   font-weight: 600;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-  padding: 14px 18px;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 12px 16px;
+  transition: background-color var(--transition-normal);
+  border-bottom: 2px solid var(--table-header-border);
+  background-color: var(--table-header-bg);
+  color: var(--table-header-text);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
-.enhanced-table-items :deep(td) {
-  padding: 14px 18px;
-  height: 64px;
+/* Table row styling */
+.modern-items-table :deep(tr) {
+  transition: all 0.2s ease;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.modern-items-table :deep(tr:hover) {
+  background-color: var(--table-row-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+/* Table cell styling */
+.modern-items-table :deep(td) {
+  padding: 12px 16px;
   vertical-align: middle;
 }
 
-.enhanced-table-items :deep(tr:hover) {
-  background: rgba(25, 118, 210, 0.05);
+/* Expanded content styling */
+.expanded-content {
+  padding: var(--dynamic-md);
+  background-color: var(--surface-secondary);
+  border-radius: 0 0 var(--border-radius-md) var(--border-radius-md);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.05);
+  animation: fadeIn 0.3s ease;
 }
 
-.enhanced-table-items :deep(.v-data-table__expanded) {
-  padding: 20px 24px;
-  background-color: #fafafa;
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* Dark mode adjustments */
-:deep(.dark-theme) .enhanced-table-items,
-:deep(.v-theme--dark) .enhanced-table-items,
-::v-deep(.dark-theme) .enhanced-table-items,
-::v-deep(.v-theme--dark) .enhanced-table-items {
-  background-color: #121212 !important;
-}
-
-:deep(.dark-theme) .enhanced-table-items :deep(th),
-:deep(.v-theme--dark) .enhanced-table-items :deep(th),
-:deep(.dark-theme) .enhanced-table-items :deep(td),
-:deep(.v-theme--dark) .enhanced-table-items :deep(td),
-::v-deep(.dark-theme) .enhanced-table-items th,
-::v-deep(.v-theme--dark) .enhanced-table-items th,
-::v-deep(.dark-theme) .enhanced-table-items td,
-::v-deep(.v-theme--dark) .enhanced-table-items td {
-  color: #fff !important;
-  background-color: #1E1E1E !important;
-  border-color: #373737 !important;
-}
-
-:deep(.dark-theme) .enhanced-table-items :deep(.v-data-table__wrapper),
-:deep(.v-theme--dark) .enhanced-table-items :deep(.v-data-table__wrapper),
-:deep(.dark-theme) .enhanced-table-items :deep(.v-table__wrapper),
-:deep(.v-theme--dark) .enhanced-table-items :deep(.v-table__wrapper),
-::v-deep(.dark-theme) .enhanced-table-items .v-data-table__wrapper,
-::v-deep(.v-theme--dark) .enhanced-table-items .v-data-table__wrapper,
-::v-deep(.dark-theme) .enhanced-table-items .v-table__wrapper,
-::v-deep(.v-theme--dark) .enhanced-table-items .v-table__wrapper {
-  background-color: #121212 !important;
-}
-
-:deep(.dark-theme) .enhanced-table-items :deep(.v-data-table__expanded),
-:deep(.v-theme--dark) .enhanced-table-items :deep(.v-data-table__expanded),
-::v-deep(.dark-theme) .enhanced-table-items .v-data-table__expanded,
-::v-deep(.v-theme--dark) .enhanced-table-items .v-data-table__expanded {
-  background-color: #1E1E1E !important;
-}
-
-.currency-display {
+/* Action panel styling */
+.action-panel {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 4px;
+  padding: 12px;
+  margin-bottom: 16px;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: var(--border-radius-md);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-.currency-symbol {
-  font-weight: 600;
-  color: #1976d2;
-  font-size: 0.9rem;
+:deep(.dark-theme) .action-panel,
+:deep(.v-theme--dark) .action-panel {
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.amount-value {
-  font-weight: 500;
-  color: #333;
-  font-size: 0.9rem;
+.action-button-group {
+  display: flex;
+  gap: 8px;
 }
 
-/* Ensure numeric values remain visible in dark mode */
-:deep(.dark-theme) .amount-value,
-:deep(.v-theme--dark) .amount-value,
-::v-deep(.dark-theme) .amount-value,
-::v-deep(.v-theme--dark) .amount-value {
-  color: #fff !important;
-}
-
-/* Ensure table headings are dark themed */
-:deep(.dark-theme) .enhanced-table-items :deep(thead th),
-:deep(.v-theme--dark) .enhanced-table-items :deep(thead th),
-::v-deep(.dark-theme) .enhanced-table-items thead th,
-::v-deep(.v-theme--dark) .enhanced-table-items thead th {
-  background-color: #121212 !important;
-  color: #fff !important;
-}
-
-/* Ensure internal header content is also dark */
-:deep(.dark-theme) .enhanced-table-items :deep(.v-data-table-header__content),
-:deep(.v-theme--dark) .enhanced-table-items :deep(.v-data-table-header__content),
-::v-deep(.dark-theme) .enhanced-table-items .v-data-table-header__content,
-::v-deep(.v-theme--dark) .enhanced-table-items .v-data-table-header__content {
-  background-color: #121212 !important;
-}
-
-/* Ensure thead background is dark */
-:deep(.dark-theme) .enhanced-table-items :deep(thead),
-:deep(.v-theme--dark) .enhanced-table-items :deep(thead),
-::v-deep(.dark-theme) .enhanced-table-items thead,
-::v-deep(.v-theme--dark) .enhanced-table-items thead {
-  background-color: #121212 !important;
-}
-
-/* Ensure header rows are dark themed */
-:deep(.dark-theme) .enhanced-table-items :deep(thead tr),
-:deep(.v-theme--dark) .enhanced-table-items :deep(thead tr),
-::v-deep(.dark-theme) .enhanced-table-items thead tr,
-::v-deep(.v-theme--dark) .enhanced-table-items thead tr {
-  background-color: #121212 !important;
-}
-
+/* Item action buttons styling */
 .item-action-btn {
   min-width: 44px !important;
   height: 44px !important;
-  border-radius: 8px !important;
+  border-radius: 12px !important;
   transition: all 0.3s ease;
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1) !important;
-  margin: 0 3px !important;
   position: relative;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: 0 16px !important;
+}
+
+.item-action-btn .action-label {
+  margin-left: 8px;
+  font-weight: 500;
+  display: none;
+}
+
+@media (min-width: 600px) {
+  .item-action-btn .action-label {
+    display: inline-block;
+  }
+  
+  .item-action-btn {
+    min-width: 120px !important;
+  }
 }
 
 .item-action-btn:hover {
@@ -426,6 +444,7 @@ export default {
   z-index: 2;
 }
 
+/* Light theme button styles with enhanced gradients */
 .item-action-btn.delete-btn {
   background: linear-gradient(145deg, #ffebee, #ffcdd2) !important;
 }
@@ -450,34 +469,92 @@ export default {
   background: linear-gradient(145deg, #c8e6c9, #a5d6a7) !important;
 }
 
+/* Dark theme button styles */
+:deep(.dark-theme) .item-action-btn.delete-btn,
+:deep(.v-theme--dark) .item-action-btn.delete-btn {
+  background: linear-gradient(145deg, #4a1515, #3a1010) !important;
+  color: #ff8a80 !important;
+}
+
+:deep(.dark-theme) .item-action-btn.delete-btn:hover,
+:deep(.v-theme--dark) .item-action-btn.delete-btn:hover {
+  background: linear-gradient(145deg, #5a1a1a, #4a1515) !important;
+}
+
+:deep(.dark-theme) .item-action-btn.minus-btn,
+:deep(.v-theme--dark) .item-action-btn.minus-btn {
+  background: linear-gradient(145deg, #4a3c10, #3a2e0c) !important;
+  color: #ffe082 !important;
+}
+
+:deep(.dark-theme) .item-action-btn.minus-btn:hover,
+:deep(.v-theme--dark) .item-action-btn.minus-btn:hover {
+  background: linear-gradient(145deg, #5a4a14, #4a3c10) !important;
+}
+
+:deep(.dark-theme) .item-action-btn.plus-btn,
+:deep(.v-theme--dark) .item-action-btn.plus-btn {
+  background: linear-gradient(145deg, #1b4620, #133419) !important;
+  color: #a5d6a7 !important;
+}
+
+:deep(.dark-theme) .item-action-btn.plus-btn:hover,
+:deep(.v-theme--dark) .item-action-btn.plus-btn:hover {
+  background: linear-gradient(145deg, #235828, #1b4620) !important;
+}
+
+:deep(.dark-theme) .item-action-btn .v-icon,
+:deep(.v-theme--dark) .item-action-btn .v-icon {
+  opacity: 0.9;
+}
+
+/* Form layout styling */
 .item-details-form {
-  padding: 10px 5px;
-  margin-top: 5px;
-  background-color: rgba(0, 0, 0, 0.02);
-  border-radius: 8px;
-  border: 1px solid rgba(25, 118, 210, 0.08);
+  margin-top: 16px;
 }
 
-:deep(.dark-theme) .item-details-form,
-:deep(.v-theme--dark) .item-details-form,
-::v-deep(.dark-theme) .item-details-form,
-::v-deep(.v-theme--dark) .item-details-form {
-  background-color: #1E1E1E !important;
-  border-color: #373737 !important;
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.item-details-form .v-col {
-  padding: 8px 12px;
+.form-field {
+  flex: 1;
+  min-width: 200px;
 }
 
-.field-with-icon {
-  position: relative;
-  margin-bottom: 10px;
+.form-field.full-width {
+  flex-basis: 100%;
 }
 
-.field-with-icon :deep(.v-icon) {
-  color: #1976d2 !important;
-  opacity: 0.8;
+.form-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+:deep(.dark-theme) .form-section,
+:deep(.v-theme--dark) .form-section {
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* Currency and amount display */
+.currency-display {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.currency-symbol {
+  opacity: 0.7;
+  margin-right: 2px;
+  font-size: 0.85em;
+}
+
+.amount-value {
+  font-weight: 500;
+  text-align: right;
 }
 </style>
-
