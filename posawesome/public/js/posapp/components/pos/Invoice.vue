@@ -548,8 +548,14 @@ export default {
     },
 
     formatCurrency(value, precision = null) {
-      const prec = precision != null ? precision : this.currency_precision;
+      const systemCurrencyPrecision = frappe.defaults.get_default('currency_precision') || 2;
+      const prec = precision != null ? precision : systemCurrencyPrecision;
       return this.$options.mixins[0].methods.formatCurrency.call(this, value, prec);
+    },
+    formatFloat(value, precision = null) {
+      const systemFloatPrecision = frappe.defaults.get_default('float_precision') || 3;
+      const prec = precision != null ? precision : systemFloatPrecision;
+      return this.$options.mixins[0].methods.formatFloat.call(this, value, prec);
     },
 
     flt(value, precision = null) {

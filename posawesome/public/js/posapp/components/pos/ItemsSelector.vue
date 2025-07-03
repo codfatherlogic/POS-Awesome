@@ -87,7 +87,7 @@
                       ratePrecision(getConvertedRate(item))) }}
                   </div>
                   <div class="text-caption golden--text truncate">
-                    {{ format_number(item.actual_qty, hide_qty_decimals ? 0 : 4) || 0 }}
+                    {{ format_number(item.actual_qty, hide_qty_decimals ? 0 : (frappe.defaults.get_default('float_precision') || 3)) || 0 }}
                     {{ item.stock_uom || "" }}
                   </div>
                 </v-card-text>
@@ -111,7 +111,7 @@
                   </div>
                 </template>
                 <template v-slot:item.actual_qty="{ item }">
-                  <span class="golden--text">{{ format_number(item.actual_qty, hide_qty_decimals ? 0 : 4) }}</span>
+                  <span class="golden--text">{{ format_number(item.actual_qty, hide_qty_decimals ? 0 : (frappe.defaults.get_default('float_precision') || 3)) }}</span>
                 </template>
               </v-data-table-virtual>
             </div>
@@ -785,54 +785,66 @@ export default {
       if (!this.filtered_items.length || !this.first_search) {
         return;
       }
-      const qty = this.get_item_qty(this.first_search);
-      const new_item = { ...this.filtered_items[0] };
-      new_item.qty = flt(qty);
-      new_item.item_barcode.forEach((element) => {
-        if (this.search == element.barcode) {
-          new_item.uom = element.posa_uom;
-          // Call calc_uom to update rate based on new UOM
-          this.eventBus.emit("calc_uom", new_item, element.posa_uom);
-          match = true;
+      
+      // For unique item code search, directly add the single matching item
+      if (this.filtered_items.length === 1) {
+        const qty = this.get_item_qty(this.first_search);
+        const new_item = { ...this.filtered_items[0] };
+        new_item.qty = flt(qty);
+        
+        // Check for barcode match
+        new_item.item_barcode.forEach((element) => {
+          if (this.search == element.barcode) {
+            new_item.uom = element.posa_uom;
+            // Call calc_uom to update rate based on new UOM
+            this.eventBus.emit("calc_uom", new_item, element.posa_uom);
+            match = true;
+          }
+        });
+        
+        // Check for serial number match
+        if (
+          !new_item.to_set_serial_no &&
+          new_item.has_serial_no &&
+          this.pos_profile.posa_search_serial_no
+        ) {
+          new_item.serial_no_data.forEach((element) => {
+            if (this.search && element.serial_no == this.search) {
+              new_item.to_set_serial_no = this.first_search;
+              match = true;
+            }
+          });
         }
-      });
-      if (
-        !new_item.to_set_serial_no &&
-        new_item.has_serial_no &&
-        this.pos_profile.posa_search_serial_no
-      ) {
-        new_item.serial_no_data.forEach((element) => {
-          if (this.search && element.serial_no == this.search) {
-            new_item.to_set_serial_no = this.first_search;
-            match = true;
-          }
-        });
-      }
-      if (this.flags.serial_no) {
-        new_item.to_set_serial_no = this.flags.serial_no;
-      }
-      if (
-        !new_item.to_set_batch_no &&
-        new_item.has_batch_no &&
-        this.pos_profile.posa_search_batch_no
-      ) {
-        new_item.batch_no_data.forEach((element) => {
-          if (this.search && element.batch_no == this.search) {
-            new_item.to_set_batch_no = this.first_search;
-            new_item.batch_no = this.first_search;
-            match = true;
-          }
-        });
-      }
-      if (this.flags.batch_no) {
-        new_item.to_set_batch_no = this.flags.batch_no;
-      }
-      if (match) {
+        if (this.flags.serial_no) {
+          new_item.to_set_serial_no = this.flags.serial_no;
+        }
+        
+        // Check for batch number match
+        if (
+          !new_item.to_set_batch_no &&
+          new_item.has_batch_no &&
+          this.pos_profile.posa_search_batch_no
+        ) {
+          new_item.batch_no_data.forEach((element) => {
+            if (this.search && element.batch_no == this.search) {
+              new_item.to_set_batch_no = this.first_search;
+              new_item.batch_no = this.first_search;
+              match = true;
+            }
+          });
+        }
+        if (this.flags.batch_no) {
+          new_item.to_set_batch_no = this.flags.batch_no;
+        }
+        
+        // Add the item regardless of barcode/serial/batch match since it's a unique item code
         this.add_item(new_item);
         this.flags.serial_no = null;
         this.flags.batch_no = null;
         this.qty = 1;
-        this.$refs.debounce_search.focus();
+        this.search = "";
+        this.debounce_search = "";
+        this.$nextTick(() => this.$refs.debounce_search.focus());
       }
     },
     search_onchange: _.debounce(function (newSearchTerm) {
@@ -1408,7 +1420,8 @@ export default {
     },
     ratePrecision(value) {
       const numericValue = typeof value === 'string' ? parseFloat(value) : value;
-      return Number.isInteger(numericValue) ? 0 : this.currency_precision;
+      const systemCurrencyPrecision = frappe.defaults.get_default('currency_precision') || 2;
+      return Number.isInteger(numericValue) ? 0 : systemCurrencyPrecision;
     },
     format_number(value, precision) {
       const prec =
