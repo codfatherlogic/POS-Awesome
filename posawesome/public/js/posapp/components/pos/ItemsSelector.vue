@@ -53,6 +53,8 @@
                     <v-switch v-model="temp_hide_qty_decimals" :label="__('Hide quantity decimals')" hide-details
                       density="compact" color="primary" class="mb-2"></v-switch>
                     <v-switch v-model="temp_hide_zero_rate_items" :label="__('Hide zero rated items')" hide-details
+                      density="compact" color="primary" class="mb-2"></v-switch>
+                    <v-switch v-model="temp_hide_currency_symbols" :label="__('Hide currency symbols')" hide-details
                       density="compact" color="primary"></v-switch>
                   </v-card-text>
                   <v-card-actions class="pa-4 pt-0">
@@ -77,12 +79,12 @@
                 </v-img>
                 <v-card-text class="text--primary pa-1">
                   <div class="text-caption text-primary truncate">
-                    {{ currencySymbol(item.currency || pos_profile.currency) || "" }}
+                    {{ hide_currency_symbols ? '' : (currencySymbol(item.currency || pos_profile.currency) || "") }}
                     {{ format_currency(item.rate, item.currency || pos_profile.currency, ratePrecision(item.rate)) }}
                   </div>
                   <div v-if="pos_profile.posa_allow_multi_currency && selected_currency !== pos_profile.currency"
                     class="text-caption text-success truncate">
-                    {{ currencySymbol(selected_currency) || "" }}
+                    {{ hide_currency_symbols ? '' : (currencySymbol(selected_currency) || "") }}
                     {{ format_currency(getConvertedRate(item), selected_currency,
                       ratePrecision(getConvertedRate(item))) }}
                   </div>
@@ -100,11 +102,11 @@
 
                 <template v-slot:item.rate="{ item }">
                   <div>
-                    <div class="text-primary">{{ currencySymbol(item.currency || pos_profile.currency) }}
+                    <div class="text-primary">{{ hide_currency_symbols ? '' : currencySymbol(item.currency || pos_profile.currency) }}
                       {{ format_currency(item.rate, item.currency || pos_profile.currency, ratePrecision(item.rate)) }}</div>
                     <div v-if="pos_profile.posa_allow_multi_currency && selected_currency !== pos_profile.currency"
                       class="text-success">
-                      {{ currencySymbol(selected_currency) }}
+                      {{ hide_currency_symbols ? '' : currencySymbol(selected_currency) }}
                       {{ format_currency(getConvertedRate(item), selected_currency,
                         ratePrecision(getConvertedRate(item))) }}
                     </div>
@@ -202,6 +204,8 @@ export default {
     temp_hide_qty_decimals: false,
     hide_zero_rate_items: false,
     temp_hide_zero_rate_items: false,
+    hide_currency_symbols: false,
+    temp_hide_currency_symbols: false,
   }),
 
   watch: {
@@ -1440,14 +1444,19 @@ export default {
     toggleItemSettings() {
       this.temp_hide_qty_decimals = this.hide_qty_decimals;
       this.temp_hide_zero_rate_items = this.hide_zero_rate_items;
+      this.temp_hide_currency_symbols = this.hide_currency_symbols;
       this.show_item_settings = true;
     },
     cancelItemSettings() {
+      this.temp_hide_qty_decimals = this.hide_qty_decimals;
+      this.temp_hide_zero_rate_items = this.hide_zero_rate_items;
+      this.temp_hide_currency_symbols = this.hide_currency_symbols;
       this.show_item_settings = false;
     },
     applyItemSettings() {
       this.hide_qty_decimals = this.temp_hide_qty_decimals;
       this.hide_zero_rate_items = this.temp_hide_zero_rate_items;
+      this.hide_currency_symbols = this.temp_hide_currency_symbols;
       this.saveItemSettings();
       this.show_item_settings = false;
     },
@@ -1456,6 +1465,7 @@ export default {
         const settings = { 
           hide_qty_decimals: this.hide_qty_decimals,
           hide_zero_rate_items: this.hide_zero_rate_items,
+          hide_currency_symbols: this.hide_currency_symbols,
         };
         localStorage.setItem('posawesome_item_selector_settings', JSON.stringify(settings));
       } catch (e) {
@@ -1472,6 +1482,9 @@ export default {
           }
           if (typeof opts.hide_zero_rate_items === 'boolean') {
             this.hide_zero_rate_items = opts.hide_zero_rate_items;
+          }
+          if (typeof opts.hide_currency_symbols === 'boolean') {
+            this.hide_currency_symbols = opts.hide_currency_symbols;
           }
         }
       } catch (e) {
