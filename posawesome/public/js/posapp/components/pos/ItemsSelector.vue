@@ -1,7 +1,7 @@
 <template>
   <div :style="responsiveStyles">
-    <v-card :class="['selection mx-auto my-0 py-0 mt-3 dynamic-card', isDarkTheme ? '' : 'bg-grey-lighten-5']"
-      :style="{ height: responsiveStyles['--container-height'], maxHeight: responsiveStyles['--container-height'], backgroundColor: isDarkTheme ? '#121212' : '' }">
+    <v-card :class="['selection mx-auto my-0 py-0 mt-3 dynamic-card resizable', isDarkTheme ? '' : 'bg-grey-lighten-5']"
+      :style="{ height: responsiveStyles['--container-height'], maxHeight: responsiveStyles['--container-height'], backgroundColor: isDarkTheme ? '#121212' : '', resize: 'vertical', overflow: 'auto' }">
       <v-progress-linear :active="loading" :indeterminate="loading" absolute location="top"
         color="info"></v-progress-linear>
       <v-overlay :model-value="loading" class="align-center justify-center" absolute>
@@ -66,8 +66,11 @@
           </v-col>
           <v-col cols="12" class="pt-0 mt-0">
             <div fluid class="items-grid dynamic-scroll" ref="itemsContainer" v-if="items_view == 'card'"
-              :style="{ maxHeight: 'calc(' + responsiveStyles['--container-height'] + ' - 80px)' }">
+              :style="{ maxHeight: 'calc(100% - 80px)' }">
               <v-card v-for="item in filtered_items" :key="item.item_code" hover class="dynamic-item-card"
+                :draggable="true"
+                @dragstart="onDragStart($event, item)"
+                @dragend="onDragEnd"
                 @click="add_item(item)">
                 <v-img :src="item.image ||
                         '/assets/posawesome/js/posapp/components/pos/placeholder-image.png'
@@ -77,17 +80,19 @@
                 </v-img>
                 <v-card-text class="text--primary pa-1">
                   <div class="text-caption text-primary truncate">
-                    {{ currencySymbol(item.currency || pos_profile.currency) || "" }}
-                    {{ format_currency(item.rate, item.currency || pos_profile.currency, ratePrecision(item.rate)) }}
+                    {{ currencySymbol(item.original_currency || pos_profile.currency) || "" }}
+                    {{ format_currency(item.base_price_list_rate || item.rate,
+                      item.original_currency || pos_profile.currency,
+                      ratePrecision(item.base_price_list_rate || item.rate)) }}
                   </div>
                   <div v-if="pos_profile.posa_allow_multi_currency && selected_currency !== pos_profile.currency"
                     class="text-caption text-success truncate">
                     {{ currencySymbol(selected_currency) || "" }}
-                    {{ format_currency(getConvertedRate(item), selected_currency,
-                      ratePrecision(getConvertedRate(item))) }}
+                    {{ format_currency(item.rate, selected_currency,
+                      ratePrecision(item.rate)) }}
                   </div>
                   <div class="text-caption golden--text truncate">
-                    {{ format_number(item.actual_qty, hide_qty_decimals ? 0 : (frappe.defaults.get_default('float_precision') || 3)) || 0 }}
+                    {{ format_number(item.actual_qty, hide_qty_decimals ? 0 : 4) || 0 }}
                     {{ item.stock_uom || "" }}
                   </div>
                 </v-card-text>
@@ -95,23 +100,25 @@
             </div>
             <div v-else>
               <v-data-table-virtual :headers="headers" :items="filtered_items" class="sleek-data-table overflow-y-auto"
-                :style="{ maxHeight: 'calc(' + responsiveStyles['--container-height'] + ' - 80px)' }"
+                :style="{ maxHeight: 'calc(100% - 80px)' }"
                 item-key="item_code" @click:row="click_item_row">
 
                 <template v-slot:item.rate="{ item }">
                   <div>
-                    <div class="text-primary">{{ currencySymbol(item.currency || pos_profile.currency) }}
-                      {{ format_currency(item.rate, item.currency || pos_profile.currency, ratePrecision(item.rate)) }}</div>
+                    <div class="text-primary">{{ currencySymbol(item.original_currency || pos_profile.currency) }}
+                      {{ format_currency(item.base_price_list_rate || item.rate,
+                        item.original_currency || pos_profile.currency,
+                        ratePrecision(item.base_price_list_rate || item.rate)) }}</div>
                     <div v-if="pos_profile.posa_allow_multi_currency && selected_currency !== pos_profile.currency"
                       class="text-success">
                       {{ currencySymbol(selected_currency) }}
-                      {{ format_currency(getConvertedRate(item), selected_currency,
-                        ratePrecision(getConvertedRate(item))) }}
+                      {{ format_currency(item.rate, selected_currency,
+                        ratePrecision(item.rate)) }}
                     </div>
                   </div>
                 </template>
                 <template v-slot:item.actual_qty="{ item }">
-                  <span class="golden--text">{{ format_number(item.actual_qty, hide_qty_decimals ? 0 : (frappe.defaults.get_default('float_precision') || 3)) }}</span>
+                  <span class="golden--text">{{ format_number(item.actual_qty, hide_qty_decimals ? 0 : 4) }}</span>
                 </template>
               </v-data-table-virtual>
             </div>
@@ -119,7 +126,7 @@
         </v-row>
       </div>
     </v-card>
-    <v-card class="cards mb-0 mt-3 dynamic-padding">
+    <v-card class="cards mb-0 mt-3 dynamic-padding resizable" style="resize: vertical; overflow: auto;">
       <v-row no-gutters align="center" justify="center" class="dynamic-spacing-sm">
         <v-col cols="12" class="mb-2">
           <v-select :items="items_group" :label="frappe._('Items Group')" density="compact" variant="solo" hide-details
@@ -134,6 +141,18 @@
             <v-btn size="small" value="list">{{ __("List") }}</v-btn>
             <v-btn size="small" value="card">{{ __("Card") }}</v-btn>
           </v-btn-toggle>
+        </v-col>
+        <v-col cols="5" class="dynamic-margin-xs">
+          <v-btn
+            size="small"
+            block
+            color="warning"
+            variant="text"
+            @click="show_offers"
+            class="action-btn-consistent"
+          >
+            {{ offersCount }} {{ __("Offers") }}
+          </v-btn>
         </v-col>
         <v-col cols="4" class="dynamic-margin-xs">
           <v-btn size="small" block color="primary" variant="text" @click="show_coupons"
@@ -157,7 +176,7 @@
 import format from "../../format";
 import _ from "lodash";
 import CameraScanner from './CameraScanner.vue';
-import { saveItemUOMs, getItemUOMs, getLocalStock, isOffline, initializeStockCache, getItemsStorage, setItemsStorage, getLocalStockCache, setLocalStockCache, initPromise, getCachedPriceListItems, savePriceListItems, updateLocalStockCache, isStockCacheReady, getCachedItemDetails, saveItemDetailsCache } from '../../../offline/index.js';
+import { saveItemUOMs, getItemUOMs, getLocalStock, isOffline, initializeStockCache, getItemsStorage, setItemsStorage, getLocalStockCache, setLocalStockCache, initPromise, checkDbHealth, getCachedPriceListItems, savePriceListItems, updateLocalStockCache, isStockCacheReady, getCachedItemDetails, saveItemDetailsCache } from '../../../offline/index.js';
 import { responsiveMixin } from '../../mixins/responsive.js';
 
 export default {
@@ -202,6 +221,9 @@ export default {
     temp_hide_qty_decimals: false,
     hide_zero_rate_items: false,
     temp_hide_zero_rate_items: false,
+    isDragging: false,
+    // Track if the current search was triggered by a scanner
+    search_from_scanner: false,
   }),
 
   watch: {
@@ -269,7 +291,9 @@ export default {
           return;
         }
       }
-      // No cache found; keep existing items without reloading from server
+      // No cache found - force a reload so prices are updated
+      this.items_loaded = false;
+      this.get_items(true);
     }, 300),
     new_line() {
       this.eventBus.emit("set_new_line", this.new_line);
@@ -283,11 +307,10 @@ export default {
         this.update_items_details(new_value);
       }
     },
-    // Auto-trigger search when limit search is enabled and the query changes
+    // Automatically search and add item whenever the query changes
     first_search: _.debounce(function (val) {
-      if (this.pos_profile && this.pos_profile.pose_use_limit_search) {
-        this.search_onchange(val);
-      }
+      // Call without arguments so search_onchange treats it like an Enter key
+      this.search_onchange();
     }, 300),
 
     // Refresh item prices whenever the user changes currency
@@ -410,6 +433,7 @@ export default {
     },
     async get_items(force_server = false) {
       await initPromise;
+      await checkDbHealth();
       const request_token = ++this.items_request_token;
       if (!this.pos_profile) {
         console.error("No POS Profile");
@@ -785,71 +809,74 @@ export default {
       if (!this.filtered_items.length || !this.first_search) {
         return;
       }
-      
-      // For unique item code search, directly add the single matching item
-      if (this.filtered_items.length === 1) {
-        const qty = this.get_item_qty(this.first_search);
-        const new_item = { ...this.filtered_items[0] };
-        new_item.qty = flt(qty);
-        
-        // Check for barcode match
-        new_item.item_barcode.forEach((element) => {
-          if (this.search == element.barcode) {
-            new_item.uom = element.posa_uom;
-            // Call calc_uom to update rate based on new UOM
-            this.eventBus.emit("calc_uom", new_item, element.posa_uom);
+      const qty = this.get_item_qty(this.first_search);
+      const new_item = { ...this.filtered_items[0] };
+      new_item.qty = flt(qty);
+      new_item.item_barcode.forEach((element) => {
+        if (this.search == element.barcode) {
+          new_item.uom = element.posa_uom;
+          // Call calc_uom to update rate based on new UOM
+          this.eventBus.emit("calc_uom", new_item, element.posa_uom);
+          match = true;
+        }
+      });
+      if (
+        !new_item.to_set_serial_no &&
+        new_item.has_serial_no &&
+        this.pos_profile.posa_search_serial_no
+      ) {
+        new_item.serial_no_data.forEach((element) => {
+          if (this.search && element.serial_no == this.search) {
+            new_item.to_set_serial_no = this.first_search;
             match = true;
           }
         });
-        
-        // Check for serial number match
-        if (
-          !new_item.to_set_serial_no &&
-          new_item.has_serial_no &&
-          this.pos_profile.posa_search_serial_no
-        ) {
-          new_item.serial_no_data.forEach((element) => {
-            if (this.search && element.serial_no == this.search) {
-              new_item.to_set_serial_no = this.first_search;
-              match = true;
-            }
-          });
-        }
-        if (this.flags.serial_no) {
-          new_item.to_set_serial_no = this.flags.serial_no;
-        }
-        
-        // Check for batch number match
-        if (
-          !new_item.to_set_batch_no &&
-          new_item.has_batch_no &&
-          this.pos_profile.posa_search_batch_no
-        ) {
-          new_item.batch_no_data.forEach((element) => {
-            if (this.search && element.batch_no == this.search) {
-              new_item.to_set_batch_no = this.first_search;
-              new_item.batch_no = this.first_search;
-              match = true;
-            }
-          });
-        }
-        if (this.flags.batch_no) {
-          new_item.to_set_batch_no = this.flags.batch_no;
-        }
-        
-        // Add the item regardless of barcode/serial/batch match since it's a unique item code
+      }
+      if (this.flags.serial_no) {
+        new_item.to_set_serial_no = this.flags.serial_no;
+      }
+      if (
+        !new_item.to_set_batch_no &&
+        new_item.has_batch_no &&
+        this.pos_profile.posa_search_batch_no
+      ) {
+        new_item.batch_no_data.forEach((element) => {
+          if (this.search && element.batch_no == this.search) {
+            new_item.to_set_batch_no = this.first_search;
+            new_item.batch_no = this.first_search;
+            match = true;
+          }
+        });
+      }
+      if (this.flags.batch_no) {
+        new_item.to_set_batch_no = this.flags.batch_no;
+      }
+      if (match) {
         this.add_item(new_item);
         this.flags.serial_no = null;
         this.flags.batch_no = null;
         this.qty = 1;
-        this.search = "";
-        this.debounce_search = "";
-        this.$nextTick(() => this.$refs.debounce_search.focus());
+        // Clear search field after successfully adding an item
+        this.clearSearch();
+        this.$refs.debounce_search.focus();
       }
     },
     search_onchange: _.debounce(function (newSearchTerm) {
       const vm = this;
-      if (newSearchTerm) vm.search = newSearchTerm;
+
+      // Determine the actual query string and trim whitespace
+      const query = typeof newSearchTerm === "string"
+        ? newSearchTerm
+        : vm.first_search;
+
+      vm.search = (query || "").trim();
+
+      if (!vm.search) {
+        vm.search_from_scanner = false;
+        return;
+      }
+
+      const fromScanner = vm.search_from_scanner;
 
       if (vm.pos_profile.pose_use_limit_search) {
         // Only trigger search when query length meets minimum threshold
@@ -869,6 +896,13 @@ export default {
             vm.update_items_details(vm.filtered_items);
           }, 300);
         }
+      }
+
+      // Clear the input only when triggered via scanner
+      if (fromScanner) {
+        vm.clearSearch();
+        vm.$refs.debounce_search && vm.$refs.debounce_search.focus();
+        vm.search_from_scanner = false;
       }
     }, 300),
     get_item_qty(first_search) {
@@ -1141,21 +1175,24 @@ export default {
         item.original_currency = item.currency || base;
       }
 
-      let base_rate;
-      if (item.original_currency === base) {
-        base_rate = item.original_rate;
-      } else {
-        base_rate = item.original_rate * (item.plc_conversion_rate || this.exchange_rate);
-      }
+      // original_rate is in price list currency
+      const price_list_rate = item.original_rate;
 
-      if (this.selected_currency === base) {
-        item.rate = this.flt(base_rate, this.currency_precision);
-        item.currency = base;
-      } else {
-        item.rate = this.flt(base_rate / this.exchange_rate, this.currency_precision);
-        item.currency = this.selected_currency;
-      }
+      // Determine base rate using available conversion info
+      const base_rate = price_list_rate * (item.plc_conversion_rate || 1);
 
+      item.base_rate = base_rate;
+      item.base_price_list_rate = price_list_rate;
+
+      // If the price list currency matches the selected currency,
+      // don't apply any conversion
+      const converted_rate =
+        item.original_currency === this.selected_currency
+          ? price_list_rate
+          : price_list_rate * (this.exchange_rate || 1);
+
+      item.rate = this.flt(converted_rate, this.currency_precision);
+      item.currency = this.selected_currency;
       item.price_list_rate = item.rate;
     },
     scan_barcoud() {
@@ -1170,6 +1207,7 @@ export default {
           suffixKeyCodes: [],
           keyCodeMapper: function (oEvent) {
             oEvent.stopImmediatePropagation();
+            oEvent.preventDefault();
             return onScan.decodeKeyEvent(oEvent);
           },
           onScan: function (sCode) {
@@ -1186,6 +1224,8 @@ export default {
       }
     },
     trigger_onscan(sCode) {
+      // indicate this search came from a scanner
+      this.search_from_scanner = true;
       // apply scanned code as search term
       this.first_search = sCode;
       this.search = sCode;
@@ -1201,8 +1241,9 @@ export default {
           this.enter_event();
         }
 
-        // clear search field for next scan
+        // clear search field for next scan and refocus input
         this.clearSearch();
+        this.$refs.debounce_search && this.$refs.debounce_search.focus();
       });
     },
     generateWordCombinations(inputString) {
@@ -1259,6 +1300,9 @@ export default {
     },
     onBarcodeScanned(scannedCode) {
       console.log('Barcode scanned:', scannedCode);
+
+      // mark this search as coming from a scanner
+      this.search_from_scanner = true;
 
       // Clear any previous search
       this.search = '';
@@ -1330,10 +1374,9 @@ export default {
         indicator: 'green'
       }, 3);
 
-      // Clear search after successful addition
-      setTimeout(() => {
-        this.clearSearch();
-      }, 1000);
+      // Clear search after successful addition and refocus input
+      this.clearSearch();
+      this.$refs.debounce_search && this.$refs.debounce_search.focus();
     },
     showMultipleItemsDialog(items, scannedCode) {
       // Create a dialog to let user choose from multiple matches
@@ -1399,17 +1442,6 @@ export default {
       this.trigger_onscan(scannedCode);
     },
 
-    getConvertedRate(item) {
-      if (!item.rate) return 0;
-      if (!this.exchange_rate) return item.rate;
-
-      if (this.selected_currency !== this.pos_profile.currency) {
-        // item.rate currently in selected currency, convert back to base currency
-        return this.flt(item.rate * this.exchange_rate, 4);
-      }
-
-      return this.flt(item.rate / this.exchange_rate, 4);
-    },
     currencySymbol(currency) {
       return get_currency_symbol(currency);
     },
@@ -1420,8 +1452,7 @@ export default {
     },
     ratePrecision(value) {
       const numericValue = typeof value === 'string' ? parseFloat(value) : value;
-      const systemCurrencyPrecision = frappe.defaults.get_default('currency_precision') || 2;
-      return Number.isInteger(numericValue) ? 0 : systemCurrencyPrecision;
+      return Number.isInteger(numericValue) ? 0 : this.currency_precision;
     },
     format_number(value, precision) {
       const prec =
@@ -1429,7 +1460,7 @@ export default {
       return this.formatFloat(value, prec);
     },
     hasDecimalPrecision(value) {
-      // Check if the value has any decimal precision when multiplied by exchange rate
+      // Check if the value has any decimal precision when converted by exchange rate
       if (this.exchange_rate && this.exchange_rate !== 1) {
         let convertedValue = value * this.exchange_rate;
         return !Number.isInteger(convertedValue);
@@ -1450,6 +1481,27 @@ export default {
       this.hide_zero_rate_items = this.temp_hide_zero_rate_items;
       this.saveItemSettings();
       this.show_item_settings = false;
+    },
+    onDragStart(event, item) {
+      this.isDragging = true;
+      
+      // Set drag data
+      event.dataTransfer.setData('application/json', JSON.stringify({
+        type: 'item-from-selector',
+        item: item
+      }));
+      
+      // Set drag effect
+      event.dataTransfer.effectAllowed = 'copy';
+      
+      // Emit event to show drop feedback in ItemsTable
+      this.eventBus.emit('item-drag-start', item);
+    },
+    onDragEnd(event) {
+      this.isDragging = false;
+      
+      // Emit event to hide drop feedback
+      this.eventBus.emit('item-drag-end');
     },
     saveItemSettings() {
       try {
@@ -1485,7 +1537,7 @@ export default {
       return this.getItemsHeaders();
     },
     filtered_items() {
-      this.search = this.get_search(this.first_search);
+      this.search = this.get_search(this.first_search).trim();
       if (!this.pos_profile.pose_use_limit_search) {
         let filtred_list = [];
         let filtred_group_list = [];
@@ -1633,7 +1685,7 @@ export default {
         return this.first_search;
       },
       set: _.debounce(function (newValue) {
-        this.first_search = newValue;
+        this.first_search = (newValue || '').trim();
       }, 200),
     },
     debounce_qty: {
@@ -1686,6 +1738,7 @@ export default {
     this.$nextTick(function () { });
     this.eventBus.on("register_pos_profile", async (data) => {
       await initPromise;
+      await checkDbHealth();
       this.pos_profile = data.pos_profile;
       if (this.pos_profile.posa_force_reload_items && !this.pos_profile.posa_smart_reload_mode) {
         await this.get_items(true);
@@ -1795,7 +1848,8 @@ export default {
 }
 
 .dynamic-padding {
-  padding: var(--dynamic-xs) var(--dynamic-sm) var(--dynamic-xs) var(--dynamic-sm);
+  /* Equal spacing on all sides for consistent alignment */
+  padding: var(--dynamic-sm);
 }
 
 .dynamic-scroll {
@@ -1886,7 +1940,8 @@ export default {
 /* Responsive breakpoints */
 @media (max-width: 768px) {
   .dynamic-padding {
-    padding: var(--dynamic-xs) var(--dynamic-xs) var(--dynamic-xs) var(--dynamic-xs);
+    /* Reduce spacing uniformly on smaller screens */
+    padding: var(--dynamic-xs);
   }
 
   .dynamic-spacing-sm {
@@ -1901,7 +1956,7 @@ export default {
 
 @media (max-width: 480px) {
   .dynamic-padding {
-    padding: var(--dynamic-xs) var(--dynamic-xs) var(--dynamic-xs) var(--dynamic-xs);
+    padding: var(--dynamic-xs);
   }
 
   .cards {

@@ -62,6 +62,15 @@
   --field-focus: rgba(25, 118, 210, 0.1);
 }
 
+/* Ensure the main viewport fills the screen without scroll */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 :root.dark-theme {
   /* Dark mode colors */
   --cancel-start: #CF6679;
@@ -326,6 +335,33 @@
   background-color: var(--field-bg);
 }
 
+/* ===== SLEEK FIELD STYLES ===== */
+.sleek-field {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sleek-field .v-field {
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.3s ease;
+  background-color: var(--field-bg);
+}
+
+.sleek-field:hover .v-field {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.sleek-field input,
+.sleek-field .v-field__input,
+.sleek-field .v-label {
+  color: var(--text-primary);
+}
+
+.sleek-field .v-field__overlay {
+  background-color: var(--field-bg);
+}
+
 /* ===== DIALOG STYLES ===== */
 .dialog-actions-container {
   background: linear-gradient(135deg, var(--dialog-bg-start) 0%, var(--dialog-bg-end) 100%);
@@ -447,5 +483,12 @@
 
 .disable-events {
   pointer-events: none;
+}
+
+/* Allow manual resizing for POS panels */
+.resizable {
+  resize: vertical;
+  overflow: auto;
+  min-height: 100px;
 }
 

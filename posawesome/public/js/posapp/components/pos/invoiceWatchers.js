@@ -1,3 +1,5 @@
+import { clearPriceListCache } from "../../../offline/index.js";
+
 export default {
     // Watch for customer change and update related data
     customer() {
@@ -64,6 +66,9 @@ export default {
     },
 
     selected_price_list(newVal) {
+      // Clear cached price list items to avoid mixing rates
+      clearPriceListCache();
+
       const price_list = newVal === this.pos_profile.selling_price_list ? null : newVal;
       this.eventBus.emit("update_customer_price_list", price_list);
       const applied = newVal || this.pos_profile.selling_price_list;
@@ -88,6 +93,7 @@ export default {
 
     // Reactively update item prices when currency changes
     selected_currency() {
+      clearPriceListCache();
       if (this.items && this.items.length) {
         this.update_item_rates();
       }

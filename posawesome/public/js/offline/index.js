@@ -5,15 +5,17 @@ export {
         db,
         initPromise,
         persist,
-        addToPersistQueue
+        addToPersistQueue,
+        checkDbHealth
 } from './core.js';
 
 // Cache exports
 export {
-	memory,
-	getItemsStorage,
-	setItemsStorage,
-	getCustomerStorage,
+        memory,
+        memoryInitPromise,
+        getItemsStorage,
+        setItemsStorage,
+        getCustomerStorage,
 	setCustomerStorage,
 	getSalesPersonsStorage,
 	setSalesPersonsStorage,
@@ -23,11 +25,16 @@ export {
 	getOpeningDialogStorage,
 	setOpeningDialogStorage,
 	setLastSyncTotals,
-	getLastSyncTotals,
-	isManualOffline,
-	setManualOffline,
-	toggleManualOffline,
-	resetOfflineState
+        getLastSyncTotals,
+        isManualOffline,
+        setManualOffline,
+        toggleManualOffline,
+        queueHealthCheck,
+        purgeOldQueueEntries,
+        MAX_QUEUE_ITEMS,
+        resetOfflineState,
+        clearAllCache,
+        getCacheUsageEstimate
 } from './cache.js';
 
 // Stock exports
