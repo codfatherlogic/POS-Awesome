@@ -760,9 +760,39 @@ export default {
 			this.eventBus.emit("show_coupons", "true");
 		},
 		async forceReloadItems() {
+			console.log("Force reloading items via button...");
+			
+			// Show loading message
+			frappe.show_alert({
+				message: __("Reloading all items..."),
+				indicator: "blue"
+			}, 3);
+			
+			// Clear all caches
+			this.search_cache.clear();
+			this.items = [];
+			this.items_loaded = false;
+			
 			// Clear cached price list items so the reload always
 			// fetches the latest data from the server
 			await clearPriceListCache();
+			
+			// Clear local storage cache if enabled
+			if (this.pos_profile && this.pos_profile.posa_local_storage) {
+				try {
+					const cacheKeys = [
+						`items_${this.customer_price_list}`,
+						`items_cache_${this.customer_price_list}`,
+						'posawesome_items_last_sync'
+					];
+					cacheKeys.forEach(key => {
+						localStorage.removeItem(key);
+					});
+				} catch (e) {
+					console.error("Failed to clear localStorage cache:", e);
+				}
+			}
+			
 			// Always recreate the worker when forcing a reload so
 			// subsequent reloads fetch fresh data from the server.
 			if (!this.itemWorker && typeof Worker !== "undefined") {
@@ -774,7 +804,7 @@ export default {
 					this.itemWorker = null;
 				}
 			}
-			this.items_loaded = false;
+			
 			this.get_items(true);
 		},
 		async get_items(force_server = false) {
@@ -793,18 +823,28 @@ export default {
 			this.loading = true;
 			const syncSince = getItemsLastSync();
 
-			// Removed noisy debug log
+			// Debug log for troubleshooting
+			console.log("get_items called:", { 
+				force_server, 
+				items_loaded: this.items_loaded, 
+				current_items_count: this.items?.length || 0,
+				search: this.first_search,
+				pose_use_limit_search: this.pos_profile?.pose_use_limit_search 
+			});
+			
 			let search = this.get_search(this.first_search);
 			let gr = vm.item_group !== "ALL" ? vm.item_group.toLowerCase() : "";
 			let sr = search || "";
 
-			// Skip reload if items already loaded, not forcing, not searching and limit search disabled
+			// Modified skip reload logic - be more aggressive about reloading when no items are present
 			if (
 				this.items_loaded &&
 				!force_server &&
 				!this.first_search &&
 				this.pos_profile &&
-				!this.pos_profile.pose_use_limit_search
+				!this.pos_profile.pose_use_limit_search &&
+				this.items && 
+				this.items.length > 0  // Only skip if we actually have items
 			) {
 				console.info("Items already loaded, skipping reload");
 				if (this.filtered_items && this.filtered_items.length > 0) {
@@ -990,6 +1030,47 @@ export default {
 					});
 				} catch (err) {
 					console.error("Failed to fetch items", err);
+					
+					// Show user-friendly error message
+					frappe.show_alert({
+						message: __("Failed to load items. Please check your connection and try again."),
+						indicator: "red"
+					}, 5);
+					
+					// Try to load from cache as fallback
+					if (this.pos_profile && this.pos_profile.posa_local_storage) {
+						console.log("Attempting to load from cache as fallback...");
+						try {
+							const cachedItems = await getCachedPriceListItems(vm.customer_price_list);
+							if (cachedItems && cachedItems.length > 0) {
+								vm.items = cachedItems;
+								vm.items_loaded = true;
+								console.info("Loaded items from cache as fallback");
+								
+								// Ensure UOMs for cached items
+								vm.items.forEach((it) => {
+									if (!it.item_uoms || it.item_uoms.length === 0) {
+										const cached = getItemUOMs(it.item_code);
+										if (cached.length > 0) {
+											it.item_uoms = cached;
+										} else if (it.stock_uom) {
+											it.item_uoms = [{ uom: it.stock_uom, conversion_factor: 1.0 }];
+										}
+									}
+								});
+								
+								vm.eventBus.emit("set_all_items", vm.items);
+								if (vm.items.length > 0) {
+									vm.update_items_details(vm.items);
+								}
+							} else {
+								console.warn("No cached items available");
+							}
+						} catch (cacheError) {
+							console.error("Failed to load from cache:", cacheError);
+						}
+					}
+					
 					vm.loading = false;
 				}
 			} else {
@@ -1443,9 +1524,79 @@ export default {
 				this.$refs.debounce_search.focus();
 			}
 		},
+		reload_items_force() {
+			console.log("Force reloading items...");
+			// Clear cache and force server reload
+			this.items = [];
+			this.items_loaded = false;
+			this.search_cache.clear();
+			
+			// Clear local storage cache if enabled
+			if (this.pos_profile && this.pos_profile.posa_local_storage) {
+				try {
+					// Clear various cache keys
+					const cacheKeys = [
+						`items_${this.customer_price_list}`,
+						`items_cache_${this.customer_price_list}`,
+						'posawesome_items_last_sync'
+					];
+					cacheKeys.forEach(key => {
+						localStorage.removeItem(key);
+					});
+				} catch (e) {
+					console.error("Failed to clear localStorage cache:", e);
+				}
+			}
+			
+			// Show loading message
+			frappe.show_alert({
+				message: __("Reloading items..."),
+				indicator: "blue"
+			}, 3);
+			
+			// Force reload from server
+			this.get_items(true);
+		},
+		// Debug method to check current state
+		debugItemsState() {
+			console.log("=== ITEMS DEBUG INFO ===");
+			console.log("items_loaded:", this.items_loaded);
+			console.log("items count:", this.items?.length || 0);
+			console.log("filtered_items count:", this.filtered_items?.length || 0);
+			console.log("loading:", this.loading);
+			console.log("search:", this.first_search);
+			console.log("pos_profile:", this.pos_profile?.name);
+			console.log("customer_price_list:", this.customer_price_list);
+			console.log("pose_use_limit_search:", this.pos_profile?.pose_use_limit_search);
+			console.log("posa_local_storage:", this.pos_profile?.posa_local_storage);
+			console.log("search_cache size:", this.search_cache?.size || 0);
+			
+			if (this.items && this.items.length > 0) {
+				console.log("Sample items:", this.items.slice(0, 3));
+			}
+			
+			// Check localStorage
+			try {
+				const cacheKey = `items_${this.customer_price_list}`;
+				const cached = localStorage.getItem(cacheKey);
+				console.log("localStorage cache exists:", !!cached);
+				if (cached) {
+					console.log("localStorage cache size:", cached.length);
+				}
+			} catch (e) {
+				console.log("localStorage check failed:", e.message);
+			}
+			
+			console.log("========================");
+		},
 		async handleEnterKey() {
 			// Handle Enter key press for item search
 			if (!this.first_search || !this.first_search.trim()) {
+				// If no search term but no items loaded, try force reload
+				if (!this.items || this.items.length === 0) {
+					console.log("No search term and no items loaded, forcing reload...");
+					this.reload_items_force();
+				}
 				return;
 			}
 
@@ -1505,8 +1656,17 @@ export default {
 				this.clearSearch();
 				this.$refs.debounce_search.focus();
 			} else {
-				// No filtered items found, trigger search if limit search is enabled
-				this.search_onchange();
+				// No filtered items found
+				console.log("No items found for search term:", this.first_search);
+				
+				// If we have items loaded but none match, try search with pose_use_limit_search
+				if (this.items && this.items.length > 0) {
+					this.search_onchange();
+				} else {
+					// No items loaded at all, force reload
+					console.log("No items loaded, forcing reload...");
+					this.reload_items_force();
+				}
 			}
 		},
 		search_onchange: _.debounce(function (newSearchTerm) {
@@ -2601,13 +2761,38 @@ export default {
 		}
 		// Apply correct page limit based on local storage option
 		this.itemsPageLimit = this.pos_profile.posa_local_storage ? 500 : 10000;
+		
 		if (this.pos_profile && !this.pos_profile.posa_local_storage && !this.items_loaded) {
 			await forceClearAllCache();
 			await this.get_items(true);
+			
+			// Add retry logic if items didn't load
+			setTimeout(() => {
+				if (!this.items_loaded || !this.items || this.items.length === 0) {
+					console.log("Items not loaded after mount, retrying...");
+					frappe.show_alert({
+						message: __("Items not loaded, retrying..."),
+						indicator: "orange"
+					}, 3);
+					this.get_items(true);
+				}
+			}, 5000); // Retry after 5 seconds
 		}
+		
 		this.scan_barcoud();
 		// Apply the configured items per page on mount
 		this.itemsPerPage = this.items_per_page;
+		
+		// Additional check for items loading after a delay
+		setTimeout(() => {
+			if (!this.items || this.items.length === 0) {
+				console.warn("No items loaded after 10 seconds. Check network or configuration.");
+				frappe.show_alert({
+					message: __("Items taking time to load. Try clicking 'Reload Items' if needed."),
+					indicator: "yellow"
+				}, 5);
+			}
+		}, 10000); // Check after 10 seconds
 	},
 
 	beforeUnmount() {
