@@ -1,6 +1,6 @@
 import { createVuetify } from "vuetify";
 import { createApp } from "vue";
-import Dexie from "dexie";
+import Dexie from "dexie/dist/dexie.mjs";
 import VueDatePicker from "@vuepic/vue-datepicker";
 import "@vuepic/vue-datepicker/dist/main.css";
 import eventBus from "./bus";
@@ -11,7 +11,7 @@ import Home from "./Home.vue";
 
 // Expose Dexie globally for libraries that expect a global Dexie instance
 if (typeof window !== "undefined" && !window.Dexie) {
-    window.Dexie = Dexie;
+	window.Dexie = Dexie;
 }
 
 frappe.provide("frappe.PosApp");

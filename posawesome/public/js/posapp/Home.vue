@@ -1,554 +1,457 @@
 <template>
-  <v-app class="container1">
-    <v-main class="main-content">
-      <Navbar :pos-profile="posProfile" :pending-invoices="pendingInvoices" :last-invoice-id="lastInvoiceId"
-        :network-online="networkOnline" :server-online="serverOnline" :server-connecting="serverConnecting"
-        :is-ip-host="isIpHost" :sync-totals="syncTotals" :manual-offline="manualOffline" :is-dark="isDark"
-        :cache-usage="cacheUsage" :cache-usage-loading="cacheUsageLoading" :cache-usage-details="cacheUsageDetails"
-        @change-page="setPage($event)" @nav-click="handleNavClick" @close-shift="handleCloseShift"
-        @print-last-invoice="handlePrintLastInvoice" @sync-invoices="handleSyncInvoices"
-        @toggle-offline="handleToggleOffline" @toggle-theme="handleToggleTheme" @logout="handleLogout"
-        @refresh-cache-usage="handleRefreshCacheUsage" @update-after-delete="handleUpdateAfterDelete" />
-      <div class="page-content">
-        <component v-bind:is="page" class="mx-4 md-4"></component>
-      </div>
-    </v-main>
-  </v-app>
+	<v-app class="container1">
+		<v-main class="main-content">
+			<Navbar
+				:pos-profile="posProfile"
+				:pending-invoices="pendingInvoices"
+				:last-invoice-id="lastInvoiceId"
+				:network-online="networkOnline"
+				:server-online="serverOnline"
+				:server-connecting="serverConnecting"
+				:is-ip-host="isIpHost"
+				:sync-totals="syncTotals"
+				:manual-offline="manualOffline"
+				:is-dark="isDark"
+				:cache-usage="cacheUsage"
+				:cache-usage-loading="cacheUsageLoading"
+				:cache-usage-details="cacheUsageDetails"
+				:cache-ready="cacheReady"
+				@change-page="setPage($event)"
+				@nav-click="handleNavClick"
+				@close-shift="handleCloseShift"
+				@print-last-invoice="handlePrintLastInvoice"
+				@sync-invoices="handleSyncInvoices"
+				@toggle-offline="handleToggleOffline"
+				@toggle-theme="handleToggleTheme"
+				@logout="handleLogout"
+				@refresh-cache-usage="handleRefreshCacheUsage"
+				@update-after-delete="handleUpdateAfterDelete"
+			/>
+			<div class="page-content">
+				<component v-bind:is="page" class="mx-4 md-4"></component>
+			</div>
+		</v-main>
+	</v-app>
 </template>
 
 <script>
-import Navbar from './components/Navbar.vue';
-import POS from './components/pos/Pos.vue';
-import Payments from './components/payments/Pay.vue';
+import Navbar from "./components/Navbar.vue";
+import POS from "./components/pos/Pos.vue";
+import Payments from "./components/payments/Pay.vue";
 import {
-  getOpeningStorage,
-  getCacheUsageEstimate,
-  checkDbHealth,
-  queueHealthCheck,
-  purgeOldQueueEntries,
-  MAX_QUEUE_ITEMS,
-  initPromise,
-  memoryInitPromise,
-  toggleManualOffline,
-  isManualOffline,
-} from '../offline/index.js';
-import { silentPrint } from './plugins/print.js';
+	getOpeningStorage,
+	getCacheUsageEstimate,
+	checkDbHealth,
+	queueHealthCheck,
+	purgeOldQueueEntries,
+	MAX_QUEUE_ITEMS,
+	initPromise,
+	memoryInitPromise,
+	isCacheReady,
+	toggleManualOffline,
+	isManualOffline,
+	syncOfflineInvoices,
+	getPendingOfflineInvoiceCount,
+	isOffline,
+	getLastSyncTotals,
+} from "../offline/index.js";
+import { silentPrint } from "./plugins/print.js";
+import {
+	setupNetworkListeners,
+	checkNetworkConnectivity,
+	detectHostType,
+	performConnectivityChecks,
+	checkFrappePing,
+	checkCurrentOrigin,
+	checkExternalConnectivity,
+	checkWebSocketConnectivity,
+} from "./composables/useNetwork.js";
 
 export default {
-  data: function () {
-    return {
-      page: 'POS',
-      // POS Profile data
-      posProfile: {},
-      pendingInvoices: 0,
-      lastInvoiceId: '',
+	data: function () {
+		return {
+			page: "POS",
+			// POS Profile data
+			posProfile: {},
+			pendingInvoices: 0,
+			lastInvoiceId: "",
 
-      // Network status
-      networkOnline: navigator.onLine || false,
-      serverOnline: false,
-      serverConnecting: false,
-      isIpHost: false,
+			// Network status
+			networkOnline: navigator.onLine || false,
+			serverOnline: false,
+			serverConnecting: false,
+			internetReachable: false,
+			isIpHost: false,
 
-      // Sync data
-      syncTotals: { pending: 0, synced: 0, drafted: 0 },
-      manualOffline: false,
+			// Sync data
+			syncTotals: { pending: 0, synced: 0, drafted: 0 },
+			manualOffline: false,
 
+			// Cache data
+			cacheUsage: 0,
+			cacheUsageLoading: false,
+			cacheUsageDetails: { total: 0, indexedDB: 0, localStorage: 0 },
+			cacheReady: false,
+		};
+	},
+	computed: {
+		isDark() {
+			return this.$theme?.current === "dark";
+		},
+	},
+	watch: {
+		networkOnline(newVal, oldVal) {
+			if (newVal && !oldVal) {
+				this.refreshTaxInclusiveSetting();
+				this.eventBus.emit("network-online");
+				this.handleSyncInvoices();
+			}
+		},
+		serverOnline(newVal, oldVal) {
+			if (newVal && !oldVal) {
+				this.eventBus.emit("server-online");
+				this.handleSyncInvoices();
+			}
+		},
+	},
+	components: {
+		Navbar,
+		POS,
+		Payments,
+	},
+	mounted() {
+		this.remove_frappe_nav();
+		// Initialize cache ready state early from stored value
+		this.cacheReady = isCacheReady();
+		this.initializeData();
+		this.setupNetworkListeners();
+		this.setupEventListeners();
+		this.handleRefreshCacheUsage();
+	},
+	methods: {
+		setupNetworkListeners,
+		checkNetworkConnectivity,
+		detectHostType,
+		performConnectivityChecks,
+		checkFrappePing,
+		checkCurrentOrigin,
+		checkExternalConnectivity,
+		checkWebSocketConnectivity,
+		setPage(page) {
+			this.page = page;
+		},
 
-      // Cache data
-      cacheUsage: 0,
-      cacheUsageLoading: false,
-      cacheUsageDetails: { total: 0, indexedDB: 0, localStorage: 0 }
-    };
-  },
-  computed: {
-    isDark() {
-      return this.$theme?.current === 'dark';
-    }
-  },
-  components: {
-    Navbar,
-    POS,
-    Payments,
-  },
-  mounted() {
-    this.remove_frappe_nav();
-    this.initializeData();
-    this.setupNetworkListeners();
-    this.setupEventListeners();
-    this.handleRefreshCacheUsage();
-  },
-  methods: {
-    setPage(page) {
-      this.page = page;
-    },
+		async initializeData() {
+			await initPromise;
+			await memoryInitPromise;
+			this.cacheReady = true;
+			checkDbHealth().catch(() => {});
+			// Load POS profile from cache or storage
+			const openingData = getOpeningStorage();
+			if (openingData && openingData.pos_profile) {
+				this.posProfile = openingData.pos_profile;
+				if (navigator.onLine) {
+					await this.refreshTaxInclusiveSetting();
+				}
+			}
 
-    async initializeData() {
-      await initPromise;
-      await memoryInitPromise;
-      checkDbHealth().catch(() => {});
-      // Load POS profile from cache or storage
-      const openingData = getOpeningStorage();
-      if (openingData && openingData.pos_profile) {
-        this.posProfile = openingData.pos_profile;
-      }
+			if (queueHealthCheck()) {
+				alert("Offline queue is too large. Old entries will be purged.");
+				purgeOldQueueEntries();
+			}
 
-      if (queueHealthCheck()) {
-        alert('Offline queue is too large. Old entries will be purged.');
-        purgeOldQueueEntries();
-      }
+			this.pendingInvoices = getPendingOfflineInvoiceCount();
+			this.syncTotals = getLastSyncTotals();
 
-      getCacheUsageEstimate().then((usage) => {
-        if (usage.percentage > 90) {
-          alert('Local cache nearing capacity. Consider going online to sync.');
-        }
-      }).catch(() => {});
+			getCacheUsageEstimate()
+				.then((usage) => {
+					if (usage.percentage > 90) {
+						alert("Local cache nearing capacity. Consider going online to sync.");
+					}
+				})
+				.catch(() => {});
 
-      // Check if running on IP host
-      this.isIpHost = /^\d+\.\d+\.\d+\.\d+/.test(window.location.hostname);
+			// Check if running on IP host
+			this.isIpHost = /^\d+\.\d+\.\d+\.\d+/.test(window.location.hostname);
 
-      // Initialize manual offline state from cached value
-      this.manualOffline = isManualOffline();
-      if (this.manualOffline) {
-        this.networkOnline = false;
-        this.serverOnline = false;
-        window.serverOnline = false;
-      }
-    },
+			// Initialize manual offline state from cached value
+			this.manualOffline = isManualOffline();
+			if (this.manualOffline) {
+				this.networkOnline = false;
+				this.serverOnline = false;
+				window.serverOnline = false;
+			}
+		},
 
-    setupNetworkListeners() {
-      // Listen for network status changes
-      window.addEventListener('online', () => {
-        this.networkOnline = true;
-        console.log('Network: Online');
-        // Verify actual connectivity
-        this.checkNetworkConnectivity();
-      });
+		setupEventListeners() {
+			// Listen for POS profile registration
+			if (this.eventBus) {
+				this.eventBus.on("register_pos_profile", (data) => {
+					this.posProfile = data.pos_profile || {};
+					if (navigator.onLine) {
+						this.refreshTaxInclusiveSetting();
+					}
+				});
 
-      window.addEventListener('offline', () => {
-        this.networkOnline = false;
-        this.serverOnline = false;
-        window.serverOnline = false;
-        console.log('Network: Offline');
-        this.$forceUpdate();
-      });
+				// Track last submitted invoice id
+				this.eventBus.on("set_last_invoice", (invoiceId) => {
+					this.lastInvoiceId = invoiceId;
+				});
 
-      // Initial network status
-      this.networkOnline = navigator.onLine;
-      this.checkNetworkConnectivity();
+				// Allow other components to trigger printing
+				this.eventBus.on("print_last_invoice", () => {
+					this.handlePrintLastInvoice();
+				});
 
-      // Periodic network check every 15 seconds
-      setInterval(() => {
-        if (navigator.onLine) {
-          this.checkNetworkConnectivity();
-        }
-      }, 15000);
-    },
+				// Manual trigger to sync offline invoices
+				this.eventBus.on("sync_invoices", () => {
+					this.handleSyncInvoices();
+				});
 
-    async checkNetworkConnectivity() {
-      try {
-        let isConnected = false;
+				// Update pending invoice count when other modules emit the change
+				this.eventBus.on("pending_invoices_changed", (count) => {
+					this.pendingInvoices = count;
+				});
+			}
 
-        // Strategy 1: Try Frappe's desk endpoint (always available)
-        try {
-          const response = await fetch('/app', {
-            method: 'HEAD',
-            cache: 'no-cache',
-            signal: AbortSignal.timeout(5000)
-          });
-          if (response.status < 500) {
-            isConnected = true;
-          }
-        } catch (error) {
-          console.log('Desk endpoint check failed:', error.message);
-        }
+			// Enhanced server connection status listeners
+			if (frappe.realtime) {
+				frappe.realtime.on("connect", () => {
+					this.serverOnline = true;
+					window.serverOnline = true;
+					this.serverConnecting = false;
+					console.log("Server: Connected via WebSocket");
+					this.$forceUpdate();
+				});
 
-        // Strategy 2: Try a static asset if desk fails
-        if (!isConnected) {
-          try {
-            const response = await fetch('/assets/frappe/images/frappe-logo.svg', {
-              method: 'HEAD',
-              cache: 'no-cache',
-              signal: AbortSignal.timeout(3000)
-            });
-            if (response.status < 500) {
-              isConnected = true;
-            }
-          } catch (error) {
-            console.log('Static asset check failed:', error.message);
-          }
-        }
+				frappe.realtime.on("disconnect", () => {
+					this.serverOnline = false;
+					window.serverOnline = false;
+					this.serverConnecting = false;
+					console.log("Server: Disconnected from WebSocket");
+					// Trigger connectivity check to verify if it's just WebSocket or full network
+					setTimeout(() => {
+						if (!isManualOffline()) {
+							this.checkNetworkConnectivity();
+						}
+					}, 1000);
+				});
 
-        // Strategy 3: Try current page origin as last resort
-        if (!isConnected) {
-          try {
-            const response = await fetch(window.location.origin, {
-              method: 'HEAD',
-              cache: 'no-cache',
-              signal: AbortSignal.timeout(3000)
-            });
-            if (response.status < 500) {
-              isConnected = true;
-            }
-          } catch (error) {
-            console.log('Origin check failed:', error.message);
-          }
-        }
+				frappe.realtime.on("connecting", () => {
+					this.serverConnecting = true;
+					console.log("Server: Connecting to WebSocket...");
+					this.$forceUpdate();
+				});
 
-        // Update network and server status
-        if (isConnected) {
-          this.networkOnline = true;
-          this.serverOnline = true;
-          window.serverOnline = true;
-          this.serverConnecting = false;
-          console.log('Network: Connected');
-        } else {
-          this.networkOnline = navigator.onLine;
-          this.serverOnline = false;
-          window.serverOnline = false;
-          this.serverConnecting = false;
-          console.log('Network: Disconnected');
-        }
+				frappe.realtime.on("reconnect", () => {
+					console.log("Server: Reconnected to WebSocket");
+					window.serverOnline = true;
+					if (!isManualOffline()) {
+						this.checkNetworkConnectivity();
+					}
+				});
+			}
 
-        // Force Vue reactivity update
-        this.$forceUpdate();
+			// Listen for visibility changes to check connectivity when tab becomes active
+			document.addEventListener("visibilitychange", () => {
+				if (!document.hidden && navigator.onLine && !isManualOffline()) {
+					this.checkNetworkConnectivity();
+				}
+			});
+		},
 
-      } catch (error) {
-        console.warn('Network connectivity check failed:', error);
-        this.networkOnline = navigator.onLine;
-        this.serverOnline = false;
-        window.serverOnline = false;
-        this.serverConnecting = false;
-        this.$forceUpdate();
-      }
-    },
+		// Event handlers for navbar events
+		handleNavClick() {
+			// Handle navigation click
+		},
 
-    detectHostType(hostname) {
-      // Check for IP addresses (IPv4)
-      const ipv4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+		handleCloseShift() {
+			// Trigger POS closing dialog via event bus
+			this.eventBus.emit("open_closing_dialog");
+		},
 
-      // Check for IPv6 addresses
-      const ipv6Regex = /^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::1$|^::/;
+		handlePrintLastInvoice() {
+			if (!this.lastInvoiceId) {
+				return;
+			}
 
-      // Check for localhost variants
-      const localhostVariants = ['localhost', '127.0.0.1', '::1', '0.0.0.0'];
+			const print_format = this.posProfile.print_format_for_online || this.posProfile.print_format;
+			const letter_head = this.posProfile.letter_head || 0;
+			const url =
+				frappe.urllib.get_base_url() +
+				"/printview?doctype=Sales%20Invoice&name=" +
+				this.lastInvoiceId +
+				"&trigger_print=1" +
+				"&format=" +
+				print_format +
+				"&no_letterhead=" +
+				letter_head;
 
-      return ipv4Regex.test(hostname) ||
-        ipv6Regex.test(hostname) ||
-        localhostVariants.includes(hostname.toLowerCase());
-    },
+			if (this.posProfile.posa_silent_print) {
+				silentPrint(url);
+			} else {
+				const printWindow = window.open(url, "Print");
+				printWindow.addEventListener(
+					"load",
+					function () {
+						printWindow.print();
+					},
+					{ once: true },
+				);
+			}
+		},
 
-    async performConnectivityChecks(hostname, protocol, port) {
-      const checks = [];
+		async handleSyncInvoices() {
+			const pending = getPendingOfflineInvoiceCount();
+			if (pending) {
+				this.eventBus.emit("show_message", {
+					title: `${pending} invoice${pending > 1 ? "s" : ""} pending for sync`,
+					color: "warning",
+				});
+			}
+			if (isOffline()) {
+				return;
+			}
+			const result = await syncOfflineInvoices();
+			if (result && (result.synced || result.drafted)) {
+				if (result.synced) {
+					this.eventBus.emit("show_message", {
+						title: `${result.synced} offline invoice${result.synced > 1 ? "s" : ""} synced`,
+						color: "success",
+					});
+				}
+				if (result.drafted) {
+					this.eventBus.emit("show_message", {
+						title: `${result.drafted} offline invoice${result.drafted > 1 ? "s" : ""} saved as draft`,
+						color: "warning",
+					});
+				}
+			}
+			this.pendingInvoices = getPendingOfflineInvoiceCount();
+			this.syncTotals = result || this.syncTotals;
+		},
 
-      // Strategy 1: Try Frappe ping endpoint
-      checks.push(this.checkFrappePing());
+		handleToggleOffline() {
+			toggleManualOffline();
+			this.manualOffline = isManualOffline();
+			if (this.manualOffline) {
+				this.networkOnline = false;
+				this.serverOnline = false;
+				window.serverOnline = false;
+			} else {
+				this.checkNetworkConnectivity();
+			}
+		},
 
-      // Strategy 2: Try current origin with a simple request
-      checks.push(this.checkCurrentOrigin(protocol, hostname, port));
+		handleToggleTheme() {
+			// Use the global theme plugin instead of local state
+			this.$theme.toggle();
+		},
 
-      // Strategy 3: For non-local hosts, try external connectivity
-      if (!this.isIpHost) {
-        checks.push(this.checkExternalConnectivity());
-      }
+		handleLogout() {
+			window.location.href = "/app";
+		},
 
-      // Strategy 4: WebSocket connectivity check
-      if (frappe.realtime && frappe.realtime.socket) {
-        checks.push(this.checkWebSocketConnectivity());
-      }
+		handleRefreshCacheUsage() {
+			this.cacheUsageLoading = true;
+			getCacheUsageEstimate()
+				.then((usage) => {
+					this.cacheUsage = usage.percentage || 0;
+					this.cacheUsageDetails = {
+						total: usage.total || 0,
+						indexedDB: usage.indexedDB || 0,
+						localStorage: usage.localStorage || 0,
+					};
+				})
+				.catch((e) => {
+					console.error("Failed to refresh cache usage", e);
+				})
+				.finally(() => {
+					this.cacheUsageLoading = false;
+				});
+		},
 
-      try {
-        // Wait for any check to succeed (race condition)
-        const results = await Promise.allSettled(checks);
-        return results.some(result => result.status === 'fulfilled' && result.value === true);
-      } catch (error) {
-        console.warn('All connectivity checks failed:', error);
-        return false;
-      }
-    },
+		async refreshTaxInclusiveSetting() {
+			if (!this.posProfile || !this.posProfile.name || !navigator.onLine) {
+				return;
+			}
+			try {
+				const r = await frappe.call({
+					method: "posawesome.posawesome.api.utilities.get_pos_profile_tax_inclusive",
+					args: {
+						pos_profile: this.posProfile.name,
+					},
+				});
+				if (r.message !== undefined) {
+					const val = r.message;
+					try {
+						localStorage.setItem("posa_tax_inclusive", JSON.stringify(val));
+					} catch (err) {
+						console.warn("Failed to cache tax inclusive setting", err);
+					}
+					import("../offline/index.js")
+						.then((m) => {
+							if (m && m.setTaxInclusiveSetting) {
+								m.setTaxInclusiveSetting(val);
+							}
+						})
+						.catch(() => {});
+				}
+			} catch (e) {
+				console.warn("Failed to refresh tax inclusive setting", e);
+			}
+		},
 
-    async checkFrappePing() {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
+		handleUpdateAfterDelete() {
+			// Handle update after delete
+		},
 
-        const response = await fetch('/api/method/ping', {
-          method: 'HEAD',
-          cache: 'no-cache',
-          signal: controller.signal,
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          }
-        });
-
-        clearTimeout(timeoutId);
-        return response.ok;
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          console.warn('Frappe ping check failed:', error);
-        }
-        return false;
-      }
-    },
-
-    async checkCurrentOrigin(protocol, hostname, port) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-        // Construct the URL based on current origin
-        const baseUrl = `${protocol}//${hostname}${port ? ':' + port : ''}`;
-
-        // Try to fetch a lightweight resource
-        const response = await fetch(`${baseUrl}/api/method/frappe.auth.get_logged_user`, {
-          method: 'HEAD',
-          cache: 'no-cache',
-          signal: controller.signal,
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate'
-          }
-        });
-
-        clearTimeout(timeoutId);
-        return response.status < 500; // Accept any response that's not a server error
-      } catch (error) {
-        if (error.name !== 'AbortError') {
-          console.warn('Current origin check failed:', error);
-        }
-        return false;
-      }
-    },
-
-    async checkExternalConnectivity() {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-        // Try to reach a reliable external service
-        const response = await fetch('https://httpbin.org/status/200', {
-          method: 'HEAD',
-          mode: 'no-cors',
-          cache: 'no-cache',
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-        return true; // If we reach here, we have internet connectivity
-      } catch (error) {
-        // For no-cors requests, we might get an opaque response
-        // which is still a sign of connectivity
-        if (error.name !== 'AbortError') {
-          console.warn('External connectivity check failed:', error);
-        }
-        return false;
-      }
-    },
-
-    async checkWebSocketConnectivity() {
-      try {
-        if (frappe.realtime && frappe.realtime.socket) {
-          const socketState = frappe.realtime.socket.readyState;
-          // WebSocket.OPEN = 1
-          return socketState === 1;
-        }
-        return false;
-      } catch (error) {
-        console.warn('WebSocket connectivity check failed:', error);
-        return false;
-      }
-    },
-
-    setupEventListeners() {
-      // Listen for POS profile registration
-      if (this.eventBus) {
-        this.eventBus.on('register_pos_profile', (data) => {
-          this.posProfile = data.pos_profile || {};
-        });
-
-        // Track last submitted invoice id
-        this.eventBus.on('set_last_invoice', (invoiceId) => {
-          this.lastInvoiceId = invoiceId;
-        });
-
-        // Allow other components to trigger printing
-        this.eventBus.on('print_last_invoice', () => {
-          this.handlePrintLastInvoice();
-        });
-      }
-
-      // Enhanced server connection status listeners
-      if (frappe.realtime) {
-        frappe.realtime.on('connect', () => {
-          this.serverOnline = true;
-          window.serverOnline = true;
-          this.serverConnecting = false;
-          console.log('Server: Connected via WebSocket');
-          this.$forceUpdate();
-        });
-
-        frappe.realtime.on('disconnect', () => {
-          this.serverOnline = false;
-          window.serverOnline = false;
-          this.serverConnecting = false;
-          console.log('Server: Disconnected from WebSocket');
-          // Trigger connectivity check to verify if it's just WebSocket or full network
-          setTimeout(() => this.checkNetworkConnectivity(), 1000);
-        });
-
-        frappe.realtime.on('connecting', () => {
-          this.serverConnecting = true;
-          console.log('Server: Connecting to WebSocket...');
-          this.$forceUpdate();
-        });
-
-        frappe.realtime.on('reconnect', () => {
-          console.log('Server: Reconnected to WebSocket');
-          window.serverOnline = true;
-          this.checkNetworkConnectivity();
-        });
-      }
-
-      // Listen for visibility changes to check connectivity when tab becomes active
-      document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && navigator.onLine) {
-          this.checkNetworkConnectivity();
-        }
-      });
-    },
-
-    // Event handlers for navbar events
-    handleNavClick() {
-      // Handle navigation click
-    },
-
-    handleCloseShift() {
-      // Emit to POS component
-      this.eventBus.emit('close_shift');
-    },
-
-    handlePrintLastInvoice() {
-      if (!this.lastInvoiceId) {
-        return;
-      }
-
-      const print_format =
-        this.posProfile.print_format_for_online || this.posProfile.print_format;
-      const letter_head = this.posProfile.letter_head || 0;
-      const url =
-        frappe.urllib.get_base_url() +
-        '/printview?doctype=Sales%20Invoice&name=' +
-        this.lastInvoiceId +
-        '&trigger_print=1' +
-        '&format=' +
-        print_format +
-        '&no_letterhead=' +
-        letter_head;
-
-      if (this.posProfile.posa_silent_print) {
-        silentPrint(url);
-      } else {
-        const printWindow = window.open(url, 'Print');
-        printWindow.addEventListener(
-          'load',
-          function () {
-            printWindow.print();
-          },
-          { once: true }
-        );
-      }
-    },
-
-    handleSyncInvoices() {
-      // Handle sync invoices
-      this.eventBus.emit('sync_invoices');
-    },
-
-    handleToggleOffline() {
-      toggleManualOffline();
-      this.manualOffline = isManualOffline();
-      if (this.manualOffline) {
-        this.networkOnline = false;
-        this.serverOnline = false;
-        window.serverOnline = false;
-      } else {
-        this.checkNetworkConnectivity();
-      }
-    },
-
-    handleToggleTheme() {
-      // Use the global theme plugin instead of local state
-      this.$theme.toggle();
-    },
-
-    handleLogout() {
-      window.location.href = '/app';
-    },
-
-    handleRefreshCacheUsage() {
-      this.cacheUsageLoading = true;
-      getCacheUsageEstimate()
-        .then((usage) => {
-          this.cacheUsage = usage.percentage || 0;
-          this.cacheUsageDetails = {
-            total: usage.total || 0,
-            indexedDB: usage.indexedDB || 0,
-            localStorage: usage.localStorage || 0,
-          };
-        })
-        .catch((e) => {
-          console.error('Failed to refresh cache usage', e);
-        })
-        .finally(() => {
-          this.cacheUsageLoading = false;
-        });
-    },
-
-    handleUpdateAfterDelete() {
-      // Handle update after delete
-    },
-
-    remove_frappe_nav() {
-      this.$nextTick(function () {
-        $('.page-head').remove();
-        $('.navbar.navbar-default.navbar-fixed-top').remove();
-      });
-    },
-  },
-  created: function () {
-    setTimeout(() => {
-      this.remove_frappe_nav();
-    }, 1000);
-  },
+		remove_frappe_nav() {
+			this.$nextTick(function () {
+				$(".page-head").remove();
+				$(".navbar.navbar-default.navbar-fixed-top").remove();
+			});
+		},
+	},
+	beforeUnmount() {
+		if (this.eventBus) {
+			this.eventBus.off("pending_invoices_changed");
+		}
+	},
+	created: function () {
+		setTimeout(() => {
+			this.remove_frappe_nav();
+		}, 1000);
+	},
 };
 </script>
 
 <style scoped>
 .container1 {
-  /* Use dynamic viewport units for better mobile support */
-  height: 100dvh;
-  max-height: 100dvh;
-  overflow: hidden;
+	/* Use dynamic viewport units for better mobile support */
+	height: 100dvh;
+	max-height: 100dvh;
+	overflow: hidden;
 }
 
 .main-content {
-  /* Fill the available height of the container */
-  height: 100%;
-  display: flex;
-  flex-direction: column;
+	/* Fill the available height of the container */
+	height: 100%;
+	display: flex;
+	flex-direction: column;
 }
 
 .page-content {
-  flex: 1;
-  overflow-y: auto;
-  padding-top: 8px;
+	flex: 1;
+	overflow-y: auto;
+	padding-top: 8px;
 }
 
 /* Ensure proper spacing and prevent layout shifts */
 :deep(.v-main__wrap) {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-  height: 100%;
+	display: flex;
+	flex-direction: column;
+	min-height: 100%;
+	height: 100%;
 }
 </style>

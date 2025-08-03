@@ -2,21 +2,28 @@
 
 // Core exports
 export {
-        db,
-        initPromise,
-        persist,
-        addToPersistQueue,
-        checkDbHealth
-} from './core.js';
+	db,
+	initPromise,
+	persist,
+	addToPersistQueue,
+	checkDbHealth,
+	initPersistWorker,
+	terminatePersistWorker,
+} from "./core.js";
 
 // Cache exports
 export {
-        memory,
-        memoryInitPromise,
-        getItemsStorage,
-        setItemsStorage,
-        getCustomerStorage,
+	memory,
+	memoryInitPromise,
+	getStoredItems,
+	saveItems,
+	clearStoredItems,
+	getCustomerStorage,
 	setCustomerStorage,
+	getItemsLastSync,
+	setItemsLastSync,
+	getCustomersLastSync,
+	setCustomersLastSync,
 	getSalesPersonsStorage,
 	setSalesPersonsStorage,
 	getOpeningStorage,
@@ -24,18 +31,25 @@ export {
 	clearOpeningStorage,
 	getOpeningDialogStorage,
 	setOpeningDialogStorage,
+	getTaxTemplate,
+	setTaxTemplate,
 	setLastSyncTotals,
-        getLastSyncTotals,
-        isManualOffline,
-        setManualOffline,
-        toggleManualOffline,
-        queueHealthCheck,
-        purgeOldQueueEntries,
-        MAX_QUEUE_ITEMS,
-        resetOfflineState,
-        clearAllCache,
-        getCacheUsageEstimate
-} from './cache.js';
+	getLastSyncTotals,
+	getTaxInclusiveSetting,
+	setTaxInclusiveSetting,
+	isManualOffline,
+	setManualOffline,
+	toggleManualOffline,
+	queueHealthCheck,
+	purgeOldQueueEntries,
+	MAX_QUEUE_ITEMS,
+	resetOfflineState,
+	reduceCacheUsage,
+	clearAllCache,
+	forceClearAllCache,
+	getCacheUsageEstimate,
+	isCacheReady,
+} from "./cache.js";
 
 // Stock exports
 export {
@@ -50,8 +64,8 @@ export {
 	getLocalStockCache,
 	setLocalStockCache,
 	fetchItemStockQuantities,
-	updateLocalStockWithActualQuantities
-} from './stock.js';
+	updateLocalStockWithActualQuantities,
+} from "./stock.js";
 
 // Sync exports
 export {
@@ -72,8 +86,8 @@ export {
 	clearOfflineCustomers,
 	syncOfflineInvoices,
 	syncOfflineCustomers,
-	syncOfflinePayments
-} from './sync.js';
+	syncOfflinePayments,
+} from "./sync.js";
 
 // Items exports
 export {
@@ -85,13 +99,24 @@ export {
 	getCachedPriceListItems,
 	clearPriceListCache,
 	saveItemDetailsCache,
-	getCachedItemDetails
-} from './items.js';
+	getCachedItemDetails,
+	saveItemsBulk,
+	getAllStoredItems,
+	searchStoredItems,
+} from "./items.js";
+
+export { saveItemGroups, getCachedItemGroups, clearItemGroups } from "./item_groups.js";
 
 // Customers exports
 export {
 	saveCustomerBalance,
 	getCachedCustomerBalance,
 	clearCustomerBalanceCache,
-	clearExpiredCustomerBalances
-} from './customers.js';
+	clearExpiredCustomerBalances,
+} from "./customers.js";
+
+// Coupons exports
+export { saveCoupons, getCachedCoupons, clearCoupons } from "./coupons.js";
+
+// Translation cache exports
+export { getTranslationsCache, saveTranslationsCache } from "./cache.js";
