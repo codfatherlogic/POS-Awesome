@@ -227,7 +227,7 @@ def get_items(
 		condition += get_item_group_condition(pos_profile.get("name"))
 
 		if use_limit_search and limit is None:
-			search_limit = pos_profile.get("posa_search_limit") or 500
+			search_limit = pos_profile.get("posa_search_limit") or 1000  # Increased from 500 to 1000
 			data = {}
 			if search_value:
 				data = search_serial_or_batch_or_barcode_number(search_value, search_serial_no)
@@ -256,7 +256,7 @@ def get_items(
 
 		result = []
 
-		# Build ORM filters
+		# Build ORM filters with improved search logic
 		filters = {"disabled": 0, "is_sales_item": 1, "is_fixed_asset": 0}
 
 		# Add item group filter
@@ -265,21 +265,45 @@ def get_items(
 		if item_groups:
 			filters["item_group"] = ["in", item_groups]
 
-		# Add search conditions
+		# Enhanced search conditions with priority ordering
 		or_filters = []
 		if use_limit_search and search_value:
 			data = search_serial_or_batch_or_barcode_number(search_value, search_serial_no)
 			item_code = data.get("item_code") if data.get("item_code") else search_value
 
+			# Priority 1: Exact item code match
+			exact_match_filters = filters.copy()
+			exact_match_filters["name"] = item_code
+			
+			# Priority 2: Item code starts with search term
+			starts_with_filters = filters.copy()
+			starts_with_filters["name"] = ["like", f"{item_code}%"]
+			
+			# Priority 3: Item name starts with search term  
+			name_starts_filters = filters.copy()
+			
+			# Priority 4: Contains search term
 			or_filters = [
 				["name", "like", f"%{item_code}%"],
 				["item_name", "like", f"%{item_code}%"],
 			]
 
-			# Check for exact barcode match
+			# Check for exact barcode match first
 			if data.get("item_code"):
 				filters["name"] = data.get("item_code")
 				or_filters = []
+			elif len(item_code) >= 2:  # Reduced minimum length for better performance
+				# Use starts with for better performance on large datasets
+				if len(item_code) <= 3:
+					filters["name"] = ["like", f"{item_code}%"]
+					or_filters = [["item_name", "like", f"{item_code}%"]]
+				else:
+					or_filters = [
+						["name", "like", f"{item_code}%"],
+						["item_name", "like", f"{item_code}%"],
+						["name", "like", f"%{item_code}%"],
+						["item_name", "like", f"%{item_code}%"],
+					]
 		if item_group and item_group.upper() != "ALL":
 			filters["item_group"] = ["like", f"%{item_group}%"]
 
@@ -323,6 +347,28 @@ def get_items(
 			limit_page_length=limit_page_length,
 			order_by="item_name asc",
 		)
+		
+		# Sort results to prioritize exact matches for better UX
+		if use_limit_search and search_value and items_data:
+			search_lower = search_value.lower()
+			def sort_priority(item):
+				item_code_lower = item.get("item_code", "").lower()
+				item_name_lower = item.get("item_name", "").lower()
+				
+				# Priority 1: Exact item code match
+				if item_code_lower == search_lower:
+					return (1, item.get("item_name", ""))
+				# Priority 2: Item code starts with search
+				elif item_code_lower.startswith(search_lower):
+					return (2, item.get("item_name", ""))
+				# Priority 3: Item name starts with search
+				elif item_name_lower.startswith(search_lower):
+					return (3, item.get("item_name", ""))
+				# Priority 4: Everything else
+				else:
+					return (4, item.get("item_name", ""))
+			
+			items_data.sort(key=sort_priority)
 
 		if items_data:
 			items = [d.item_code for d in items_data]
