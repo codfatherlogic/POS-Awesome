@@ -14,6 +14,20 @@ export function useItemAddition() {
 
 	// Add item to invoice
 	const addItem = async (item, context) => {
+		// Always validate customer selection for every item
+		try {
+			const { customerSelectionValidator } = await import("../services/customerSelectionValidation.js");
+			const validation = customerSelectionValidator.validateCustomerSelected(context);
+			
+			if (!validation.isValid) {
+				customerSelectionValidator.showValidationError(validation.message, context.eventBus);
+				return false;
+			}
+		} catch (error) {
+			console.error("Customer validation failed:", error);
+			// Continue with item addition even if validation fails
+		}
+
 		if (!item.uom) {
 			item.uom = item.stock_uom;
 		}

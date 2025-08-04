@@ -189,6 +189,19 @@
 							</v-dialog>
 						</div>
 					</v-col>
+					<!-- Loading Message Alert Area -->
+					<v-col cols="12" class="pb-0" v-if="loadingMessage">
+						<v-alert
+							:text="loadingMessage"
+							type="info"
+							variant="tonal"
+							color="warning"
+							density="compact"
+							class="mb-2"
+							closable
+							@click:close="clearLoadingMessage"
+						></v-alert>
+					</v-col>
 					<v-col cols="12" class="pt-0 mt-0">
 						<div
 							fluid
@@ -424,6 +437,8 @@ export default {
 		items_view: "list",
 		item_group: "ALL",
 		loading: false,
+		loadingMessage: "", // Fixed yellow loading message at the top
+		loadingCountdownInterval: null, // Interval for countdown timer
 		items_group: ["ALL"],
 		items: [],
 		search: "",
@@ -518,6 +533,17 @@ export default {
 	}),
 
 	watch: {
+		loading(newVal) {
+			// Clear loading message when loading is done
+			if (!newVal) {
+				// Small delay to allow success message to show briefly
+				setTimeout(() => {
+					if (!this.loadingMessage.includes('✅') && !this.loadingMessage.includes('❌')) {
+						this.clearLoadingMessage();
+					}
+				}, 500);
+			}
+		},
 		customer: _.debounce(function () {
 			if (this.pos_profile.posa_force_reload_items) {
 				if (this.pos_profile.posa_smart_reload_mode) {
@@ -698,6 +724,50 @@ export default {
 	},
 
 	methods: {
+		// Loading message methods
+		setLoadingMessage(message) {
+			this.loadingMessage = message;
+		},
+		clearLoadingMessage() {
+			this.loadingMessage = "";
+			this.clearLoadingCountdown();
+		},
+		// Format time estimation for display
+		formatEstimatedTime(seconds) {
+			if (seconds < 60) {
+				return `${Math.ceil(seconds)}s`;
+			} else if (seconds < 3600) {
+				const minutes = Math.floor(seconds / 60);
+				const remainingSeconds = Math.ceil(seconds % 60);
+				return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+			} else {
+				const hours = Math.floor(seconds / 3600);
+				const minutes = Math.floor((seconds % 3600) / 60);
+				return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+			}
+		},
+		// Update loading message with countdown timer
+		updateLoadingMessageWithCountdown(baseMessage, estimatedTime) {
+			if (!this.loadingCountdownInterval) {
+				let remainingTime = estimatedTime;
+				this.loadingCountdownInterval = setInterval(() => {
+					remainingTime -= 1;
+					if (remainingTime > 0) {
+						this.setLoadingMessage(`${baseMessage} • Est: ${this.formatEstimatedTime(remainingTime)}`);
+					} else {
+						clearInterval(this.loadingCountdownInterval);
+						this.loadingCountdownInterval = null;
+					}
+				}, 1000);
+			}
+		},
+		// Clear countdown timer
+		clearLoadingCountdown() {
+			if (this.loadingCountdownInterval) {
+				clearInterval(this.loadingCountdownInterval);
+				this.loadingCountdownInterval = null;
+			}
+		},
 		async loadVisibleItems(reset = false) {
 			await initPromise;
 			await checkDbHealth();
@@ -925,6 +995,11 @@ export default {
 			let batchCount = 0;
 			let batchSize = this.localStorageLoadingConfig.batchSize;
 			
+			// Progress tracking variables
+			let totalEstimatedItems = 10000; // Initial estimate, will be updated
+			let loadingStartTime = Date.now();
+			let batchLoadTimes = []; // Track batch loading times for estimation
+			
 			// Adaptive batch sizing for VPS optimization
 			let adaptiveBatchSize = batchSize;
 			
@@ -953,6 +1028,13 @@ export default {
 					const batchItems = await this.loadItemBatchForLocalStorage(offset, adaptiveBatchSize);
 					const loadTime = Date.now() - startTime;
 					
+					// Track batch load times for estimation
+					batchLoadTimes.push(loadTime);
+					// Keep only last 5 batch times for more accurate estimation
+					if (batchLoadTimes.length > 5) {
+						batchLoadTimes.shift();
+					}
+					
 					// Adaptive batch sizing: reduce size if loading is slow
 					if (loadTime > 10000) { // If batch takes more than 10 seconds
 						adaptiveBatchSize = Math.max(Math.floor(adaptiveBatchSize * 0.5), 50); // Reduce by 50%, minimum 50
@@ -970,14 +1052,50 @@ export default {
 						allItems = [...allItems, ...batchItems];
 						offset += batchItems.length;
 						
+						// Update estimated total items based on batch patterns
+						if (batchCount === 1 && batchItems.length === adaptiveBatchSize) {
+							// First full batch - make a rough estimate
+							totalEstimatedItems = Math.max(allItems.length * 20, 5000); // Conservative estimate
+						} else if (batchItems.length < adaptiveBatchSize) {
+							// Partial batch indicates we're near the end
+							totalEstimatedItems = allItems.length;
+						}
+						
+						// Calculate progress percentage
+						const progressPercentage = Math.min(Math.round((allItems.length / totalEstimatedItems) * 100), 100);
+						
+						// Calculate estimated time remaining
+						let estimatedTimeRemaining = 0;
+						if (batchLoadTimes.length > 0 && allItems.length < totalEstimatedItems) {
+							const avgBatchTime = batchLoadTimes.reduce((sum, time) => sum + time, 0) / batchLoadTimes.length;
+							const remainingItems = totalEstimatedItems - allItems.length;
+							const remainingBatches = Math.ceil(remainingItems / adaptiveBatchSize);
+							estimatedTimeRemaining = (remainingBatches * (avgBatchTime + this.localStorageLoadingConfig.batchDelay)) / 1000; // Convert to seconds
+						}
+						
 						// Update UI every batch for better feedback
 						vm.items = [...allItems];
 						vm.eventBus.emit("set_all_items", vm.items);
 						
-						frappe.show_alert({
-							message: __(`Loading items... ${allItems.length} loaded (batch ${batchCount})`),
-							indicator: "blue"
-						}, 1);
+						// Enhanced loading message with percentage and estimated time
+						let loadingMsg = __(`Loading items... ${allItems.length} loaded (batch ${batchCount}) • ${progressPercentage}%`);
+						
+						// Clear any existing countdown
+						vm.clearLoadingCountdown();
+						
+						if (estimatedTimeRemaining > 5) { // Only show countdown for estimates > 5 seconds
+							// Set the base message and start countdown
+							const baseMsg = loadingMsg;
+							vm.setLoadingMessage(`${baseMsg} • Est: ${vm.formatEstimatedTime(estimatedTimeRemaining)}`);
+							vm.updateLoadingMessageWithCountdown(baseMsg, estimatedTimeRemaining);
+						} else if (estimatedTimeRemaining > 0) {
+							// For short estimates, just show without countdown
+							loadingMsg += ` • Est: ${vm.formatEstimatedTime(estimatedTimeRemaining)}`;
+							vm.setLoadingMessage(loadingMsg);
+						} else {
+							// No estimate available
+							vm.setLoadingMessage(loadingMsg);
+						}
 						
 						// Allow UI to update and prevent blocking
 						await new Promise(resolve => setTimeout(resolve, 100));
@@ -1025,10 +1143,13 @@ export default {
 					
 					console.log(`✅ Successfully loaded ${allItems.length} items for local storage`);
 					
-					frappe.show_alert({
-						message: __(`Loaded ${allItems.length} items successfully!`),
-						indicator: "green"
-					}, 3);
+					// Calculate total loading time
+					const totalLoadingTime = (Date.now() - loadingStartTime) / 1000; // Convert to seconds
+					
+					// Clear loading message and show brief success with total time
+					vm.clearLoadingMessage();
+					vm.setLoadingMessage(__(`✅ Loaded ${allItems.length} items successfully in ${vm.formatEstimatedTime(totalLoadingTime)}!`));
+					setTimeout(() => vm.clearLoadingMessage(), 4000);
 					
 					// Update item groups
 					const groups = Array.from(
@@ -1054,10 +1175,10 @@ export default {
 				
 			} catch (error) {
 				console.error("Error loading all items for local storage:", error);
-				frappe.show_alert({
-					message: __("Error loading items. Please try again."),
-					indicator: "red"
-				}, 5);
+				const totalTime = (Date.now() - loadingStartTime) / 1000;
+				vm.clearLoadingMessage();
+				vm.setLoadingMessage(__(`❌ Error loading items after ${vm.formatEstimatedTime(totalTime)}. Please try again.`));
+				setTimeout(() => vm.clearLoadingMessage(), 6000);
 				return false;
 			}
 		},
@@ -1363,10 +1484,7 @@ export default {
 			
 			// Show loading message only if not silent
 			if (!silent) {
-				frappe.show_alert({
-					message: __("Reloading all items..."),
-					indicator: "blue"
-				}, 3);
+				this.setLoadingMessage(__("🔄 Reloading all items..."));
 			}
 			
 			// Clear smart sync pending changes
@@ -4756,6 +4874,9 @@ export default {
 			clearTimeout(this.itemDetailsRetryTimeout);
 		}
 		this.itemDetailsRetryCount = 0;
+
+		// Clear loading countdown interval
+		this.clearLoadingCountdown();
 
 		// Call cleanup function for abort controller
 		if (this.cleanupBeforeDestroy) {

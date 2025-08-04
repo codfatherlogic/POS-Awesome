@@ -567,6 +567,11 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 
 	# Determine if multi-currency is enabled on the POS Profile
 	allow_multi_currency = False
+	# Initialize default values
+	company_currency = None
+	price_list_currency = None
+	exchange_rate = 1
+
 	if item.get("pos_profile"):
 		allow_multi_currency = (
 			frappe.db.get_value("POS Profile", item.get("pos_profile"), "posa_allow_multi_currency") or 0
@@ -583,7 +588,6 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 				frappe.db.get_value("Price List", price_list, "currency") or company_currency
 			)
 
-		exchange_rate = 1
 		if price_list_currency != company_currency and allow_multi_currency:
 			from erpnext.setup.utils import get_exchange_rate
 
@@ -594,15 +598,26 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 					f"Missing exchange rate from {price_list_currency} to {company_currency}",
 					"POS Awesome",
 				)
+	else:
+		# Fallback when no company is provided
+		if price_list:
+			price_list_currency = frappe.db.get_value("Price List", price_list, "currency")
+		if not price_list_currency:
+			price_list_currency = frappe.defaults.get_user_default("Currency") or "USD"
 
 		item["price_list_currency"] = price_list_currency
 		item["plc_conversion_rate"] = exchange_rate
 		item["conversion_rate"] = exchange_rate
 
-		if doc:
-			doc.price_list_currency = price_list_currency
-			doc.plc_conversion_rate = exchange_rate
-			doc.conversion_rate = exchange_rate
+	# Set currency information in item args
+	item["price_list_currency"] = price_list_currency
+	item["plc_conversion_rate"] = exchange_rate
+	item["conversion_rate"] = exchange_rate
+
+	if doc:
+		doc.price_list_currency = price_list_currency
+		doc.plc_conversion_rate = exchange_rate
+		doc.conversion_rate = exchange_rate
 
 	# Add company and doctype to the item args for ERPNext validation
 	if company:
