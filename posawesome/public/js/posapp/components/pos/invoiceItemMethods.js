@@ -10,6 +10,16 @@ import {
 	getTaxInclusiveSetting,
 } from "../../../offline/index.js";
 
+// Safe wrapper for isOffline function
+const safeIsOffline = () => {
+	try {
+		return typeof isOffline === 'function' ? isOffline() : false;
+	} catch (error) {
+		console.warn('isOffline function error:', error);
+		return false;
+	}
+};
+
 // Import composables
 import { useBatchSerial } from "../../composables/useBatchSerial.js";
 import { useDiscounts } from "../../composables/useDiscounts.js";
@@ -49,7 +59,7 @@ export default {
 			}
 
 			// Check if offline and use cached balance
-			if (isOffline()) {
+			if (safeIsOffline()) {
 				const cachedBalance = getCachedCustomerBalance(this.customer);
 				if (cachedBalance !== null) {
 					this.customer_balance = cachedBalance;
@@ -385,7 +395,7 @@ export default {
 				});
 			});
 			doc.total_taxes_and_charges = totalTax;
-		} else if (isOffline()) {
+		} else if (safeIsOffline()) {
 			const tmpl = getTaxTemplate(this.pos_profile.taxes_and_charges);
 			if (tmpl && Array.isArray(tmpl.taxes)) {
 				const inclusive = getTaxInclusiveSetting();
@@ -476,6 +486,9 @@ export default {
 		doc.posa_coupons = this.posa_coupons;
 		doc.posa_delivery_charges = this.selected_delivery_charge?.name || null;
 		doc.posa_delivery_charges_rate = this.delivery_charges_rate || 0;
+		
+		// Set posting date and time from user selection
+		doc.set_posting_time = 1;
 		doc.posting_date = this.formatDateForBackend(this.posting_date_display);
 
 		// Add flags to ensure proper rate handling
@@ -594,6 +607,11 @@ export default {
 		doc.update_stock = 1;
 		doc.is_pos = 1;
 		doc.payments = this.get_payments();
+		
+		// Set posting date and time from user selection
+		doc.set_posting_time = 1;
+		doc.posting_date = this.formatDateForBackend(this.posting_date_display);
+		
 		return doc;
 	},
 
@@ -779,7 +797,7 @@ export default {
 	// Update invoice in backend
 	update_invoice(doc) {
 		var vm = this;
-		if (isOffline()) {
+		if (safeIsOffline()) {
 			// When offline, simply merge the passed doc with the current invoice_doc
 			// to allow offline invoice creation without server calls
 			vm.invoice_doc = Object.assign({}, vm.invoice_doc || {}, doc);
@@ -821,7 +839,7 @@ export default {
 	// Update invoice from order in backend
 	update_invoice_from_order(doc) {
 		var vm = this;
-		if (isOffline()) {
+		if (safeIsOffline()) {
 			// Offline mode - merge doc locally without server update
 			vm.invoice_doc = Object.assign({}, vm.invoice_doc || {}, doc);
 			return vm.invoice_doc;
@@ -1502,7 +1520,7 @@ export default {
 		var vm = this;
 		if (!this.customer) return;
 
-		if (isOffline()) {
+		if (safeIsOffline()) {
 			try {
 				const cached = (getCustomerStorage() || []).find(
 					(c) => c.name === vm.customer || c.customer_name === vm.customer,

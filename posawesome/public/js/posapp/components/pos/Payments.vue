@@ -1269,7 +1269,8 @@ export default {
 						this.print_offline_invoice(this.invoice_doc);
 					}
 					vm.eventBus.emit("clear_invoice");
-					vm.eventBus.emit("reset_posting_date");
+					// Don't reset posting date - let user keep their selected date
+					// vm.eventBus.emit("reset_posting_date");
 					vm.back_to_invoice();
 					vm.loading = false;
 					return;
@@ -1355,7 +1356,8 @@ export default {
 					updateLocalStock(vm.invoice_doc.items || []);
 					vm.addresses = [];
 					vm.eventBus.emit("clear_invoice");
-					vm.eventBus.emit("reset_posting_date");
+					// Don't reset posting date - let user keep their selected date
+					// vm.eventBus.emit("reset_posting_date");
 					vm.back_to_invoice();
 					vm.loading = false;
 				},

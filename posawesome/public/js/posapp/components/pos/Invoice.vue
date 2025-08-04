@@ -298,7 +298,7 @@ export default {
 			selected_delivery_charge: "", // Selected delivery charge object
 			invoice_posting_date: false, // Posting date dialog
 			posting_date: frappe.datetime.nowdate(), // Invoice posting date
-			posting_date_display: "", // Display value for date picker
+			posting_date_display: "", // Display value for date picker - will be synced by watcher
 			items_headers: [],
 			selected_currency: "", // Currently selected currency
 			exchange_rate: 1, // Current exchange rate
@@ -1146,7 +1146,9 @@ export default {
 		}
 		// Listen for reset_posting_date to reset posting date after invoice submission
 		this.eventBus.on("reset_posting_date", () => {
-			this.posting_date = frappe.datetime.nowdate();
+			const today = frappe.datetime.nowdate();
+			this.posting_date = today;
+			this.posting_date_display = this.formatDateForDisplay(today);
 		});
 		this.eventBus.on("calc_uom", this.calc_uom);
 		this.eventBus.on("item-drag-start", (item) => {

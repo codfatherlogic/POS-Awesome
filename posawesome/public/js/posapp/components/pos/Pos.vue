@@ -97,7 +97,6 @@ export default {
 		Payments,
 		Drafts,
 		ClosingDialog,
-
 		Returns,
 		PosOffers,
 		PosCoupons,

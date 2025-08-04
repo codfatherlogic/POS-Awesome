@@ -21,6 +21,7 @@
 				@close-shift="handleCloseShift"
 				@print-last-invoice="handlePrintLastInvoice"
 				@sync-invoices="handleSyncInvoices"
+				@sync-changes="handleSyncChanges"
 				@toggle-offline="handleToggleOffline"
 				@toggle-theme="handleToggleTheme"
 				@logout="handleLogout"
@@ -329,6 +330,25 @@ export default {
 			}
 			this.pendingInvoices = getPendingOfflineInvoiceCount();
 			this.syncTotals = result || this.syncTotals;
+		},
+
+		async handleSyncChanges() {
+			// Trigger Smart Sync from ItemsSelector
+			if (isOffline()) {
+				this.eventBus.emit("show_message", {
+					title: "Cannot sync changes while offline",
+					color: "warning",
+				});
+				return;
+			}
+
+			this.eventBus.emit("show_message", {
+				title: "Checking for item changes...",
+				color: "info",
+			});
+
+			// Emit event to trigger Smart Sync in ItemsSelector
+			this.eventBus.emit("trigger-smart-sync");
 		},
 
 		handleToggleOffline() {

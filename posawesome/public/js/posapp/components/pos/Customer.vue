@@ -290,6 +290,20 @@ export default {
 			}
 		},
 
+		forceReloadCustomers(silent = false) {
+			if (!silent) {
+				console.log('Customer: Force reloading customers...');
+			}
+			// Clear customers array first
+			this.customers = [];
+			// Clear cache storage
+			setCustomerStorage([]);
+			// Clear sync timestamp to force full reload
+			localStorage.removeItem('customer_names_last_sync');
+			// Reload customers from server
+			this.get_customer_names(true);
+		},
+
 		backgroundLoadCustomers(offset, syncSince) {
 			const limit = this.customersPageLimit;
 			const lastSync = syncSince;
@@ -324,14 +338,14 @@ export default {
 			});
 		},
 		// Fetch customers list
-		get_customer_names() {
+		get_customer_names(forceReload = false) {
 			var vm = this;
-			if (this.customers.length > 0) {
+			if (this.customers.length > 0 && !forceReload) {
 				this.customers_loaded = true;
 				return;
 			}
 
-			const syncSince = getCustomersLastSync();
+			const syncSince = forceReload ? null : getCustomersLastSync();
 
 			if (getCustomerStorage().length) {
 				try {
@@ -455,6 +469,14 @@ export default {
 
 			this.eventBus.on("set_customer_info_to_edit", (data) => {
 				this.customer_info = data;
+			});
+
+			this.eventBus.on("refresh_customers", (options = {}) => {
+				const silent = options.silent || false;
+				if (!silent) {
+					console.log('Customer: Received refresh_customers event');
+				}
+				this.forceReloadCustomers(silent);
 			});
 
 			this.eventBus.on("fetch_customer_details", () => {

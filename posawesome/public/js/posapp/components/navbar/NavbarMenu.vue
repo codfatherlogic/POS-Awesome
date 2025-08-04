@@ -69,6 +69,26 @@
 					</div>
 				</v-list-item>
 
+				<v-list-item 
+					@click="$emit('sync-changes')"
+					:disabled="manualOffline || !networkOnline || !serverOnline"
+					class="menu-item-compact info-action"
+				>
+					<template v-slot:prepend>
+						<div class="menu-icon-wrapper-compact info-icon">
+							<v-icon color="white" size="16">mdi-sync-circle</v-icon>
+						</div>
+					</template>
+					<div class="menu-content-compact">
+						<v-list-item-title class="menu-item-title-compact">{{
+							__("Sync Changes")
+						}}</v-list-item-title>
+						<v-list-item-subtitle class="menu-item-subtitle-compact">{{
+							__("Update changed items only")
+						}}</v-list-item-subtitle>
+					</div>
+				</v-list-item>
+
 				<v-list-item @click="$emit('toggle-offline')" class="menu-item-compact warning-action">
 					<template v-slot:prepend>
 						<div class="menu-icon-wrapper-compact warning-icon">
@@ -184,6 +204,7 @@ export default {
 		"close-shift",
 		"print-last-invoice",
 		"sync-invoices",
+		"sync-changes",
 		"toggle-offline",
 		"clear-cache",
 		"show-about",

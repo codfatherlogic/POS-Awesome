@@ -21,7 +21,7 @@
 			class="text-h6 font-weight-bold text-primary navbar-title"
 			style="cursor: pointer; text-decoration: none"
 		>
-			<span class="font-weight-light">POS</span><span>Awesome</span>
+			<span class="font-weight-light">{{ companyName }}</span>
 		</v-toolbar-title>
 
 		<v-spacer />
@@ -83,6 +83,24 @@ export default {
 	computed: {
 		appBarColor() {
 			return this.isDark ? this.$vuetify.theme.themes.dark.colors.surface : "white";
+		},
+
+		companyName() {
+			// Get company name from POS profile first
+			if (this.posProfile && this.posProfile.company) {
+				return this.posProfile.company;
+			}
+			
+			// Fallback to default company from frappe defaults
+			if (frappe.defaults && frappe.defaults.get_default) {
+				const defaultCompany = frappe.defaults.get_default("Company");
+				if (defaultCompany) {
+					return defaultCompany;
+				}
+			}
+			
+			// Final fallback to POS Awesome
+			return "POS Awesome";
 		},
 
 		displayName() {

@@ -53,6 +53,7 @@
 					@close-shift="openCloseShift"
 					@print-last-invoice="printLastInvoice"
 					@sync-invoices="syncPendingInvoices"
+					@sync-changes="syncChanges"
 					@toggle-offline="toggleManualOffline"
 					@clear-cache="clearCache"
 					@show-about="showAboutDialog = true"
@@ -247,6 +248,9 @@ export default {
 		syncPendingInvoices() {
 			this.$emit("sync-invoices");
 		},
+		syncChanges() {
+			this.$emit("sync-changes");
+		},
 		toggleManualOffline() {
 			this.$emit("toggle-offline");
 		},
@@ -327,6 +331,7 @@ export default {
 		"close-shift",
 		"print-last-invoice",
 		"sync-invoices",
+		"sync-changes",
 		"toggle-offline",
 		"toggle-theme",
 		"logout",

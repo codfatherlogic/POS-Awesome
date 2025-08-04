@@ -105,6 +105,24 @@
 							>
 								{{ __("Reload Items") }}
 							</v-btn>
+							<v-btn
+								density="compact"
+								variant="text"
+								color="success"
+								prepend-icon="mdi-sync"
+								@click="forceSyncPendingChanges"
+								class="settings-btn"
+								:disabled="loading || !pos_profile || isOffline()"
+								:loading="syncInProgress"
+							>
+								{{ syncInProgress ? __("Syncing...") : __("Sync Changes") }}
+								<v-tooltip activator="parent" location="bottom">
+									{{ syncInProgress ? 'Sync in progress...' : 
+										smartSync.pendingChanges.size > 0 ? 
+											`${smartSync.pendingChanges.size} pending changes` : 
+											'Force check for changes and sync' }}
+								</v-tooltip>
+							</v-btn>
 
 							<v-dialog v-model="show_item_settings" max-width="400px">
 								<v-card>
@@ -451,24 +469,25 @@ export default {
 		// fetched in manageable batches. Otherwise a high limit
 		// effectively disables incremental loading.
 		itemsPageLimit: 10000,
-		// Maximum items to load in local storage mode to prevent performance issues
-		maxLocalStorageItems: 50000, // Increased to handle large datasets
-		// Dynamic loading configuration for large datasets
+		// Maximum items to load in local storage mode to prevent performance issues - VPS optimized
+		maxLocalStorageItems: 10000, // Reduced from 50000 to prevent memory issues on VPS
+		// Dynamic loading configuration for large datasets - VPS optimized
 		dynamicLoadingConfig: {
 			enabled: true,
-			batchSize: 500, // Larger batch size for efficiency
+			batchSize: 100, // Reduced batch size for VPS compatibility
 			searchThreshold: 2, // Minimum chars to trigger server search
-			maxCachedBatches: 50, // More batches for large datasets
-			preloadNext: true, // Preload next batch when near end
+			maxCachedBatches: 20, // Reduced cached batches to save memory
+			preloadNext: false, // Disable preloading to reduce concurrent requests
 		},
 		// Cache for dynamic batches
 		itemBatches: new Map(),
 		totalServerItems: 0,
-		// Progressive loading for local storage
+		// Progressive loading for local storage - optimized for VPS
 		localStorageLoadingConfig: {
-			batchSize: 1000, // Load 1000 items per batch
-			maxRetries: 3,
-			retryDelay: 1000,
+			batchSize: 100, // Reduced to 100 items per batch for VPS compatibility
+			maxRetries: 2, // Reduced retries to prevent deadlocks
+			retryDelay: 2000, // Increased delay between retries
+			batchDelay: 500, // Delay between batches to prevent server overload
 		},
 		// Track if the current search was triggered by a scanner
 		search_from_scanner: false,
@@ -476,6 +495,26 @@ export default {
 		// Add missing properties to prevent Vue warnings
 		initialLoadInProgress: false,
 		search_loading: false,
+		syncInProgress: false, // Track sync state for UI feedback
+		
+		// VPS optimization: Circuit breaker for API calls
+		circuitBreaker: {
+			failures: 0,
+			maxFailures: 3,
+			isOpen: false,
+			lastFailureTime: null,
+			resetTimeout: 30000, // 30 seconds
+		},
+		
+		// Smart sync configuration for detecting changes
+		smartSync: {
+			enabled: true,
+			checkInterval: 300000, // Check every 5 minutes
+			autoSyncEnabled: true,
+			lastChangeCheck: null,
+			backgroundSyncInterval: null,
+			pendingChanges: new Set(), // Track which items need updates
+		},
 	}),
 
 	watch: {
@@ -884,41 +923,77 @@ export default {
 			let offset = 0;
 			let hasMoreItems = true;
 			let batchCount = 0;
-			const batchSize = this.localStorageLoadingConfig.batchSize;
+			let batchSize = this.localStorageLoadingConfig.batchSize;
+			
+			// Adaptive batch sizing for VPS optimization
+			let adaptiveBatchSize = batchSize;
 			
 			try {
 				while (hasMoreItems) {
 					batchCount++;
-					console.log(`📦 Loading batch ${batchCount} (items ${offset + 1}-${offset + batchSize})`);
+					console.log(`📦 Loading batch ${batchCount} (items ${offset + 1}-${offset + adaptiveBatchSize})`);
 					
-					const batchItems = await this.loadItemBatchForLocalStorage(offset, batchSize);
+					// Add delay between batches to prevent server overload on VPS
+					if (batchCount > 1) {
+						console.log(`⏳ Waiting ${this.localStorageLoadingConfig.batchDelay}ms before next batch...`);
+						await new Promise(resolve => setTimeout(resolve, this.localStorageLoadingConfig.batchDelay));
+					}
+					
+					// Check circuit breaker before each batch
+					if (this.isCircuitBreakerOpen()) {
+						console.log("Circuit breaker opened - stopping progressive loading");
+						frappe.show_alert({
+							message: __(`Loaded ${allItems.length} items before server protection activated.`),
+							indicator: "orange"
+						}, 5);
+						break;
+					}
+					
+					const startTime = Date.now();
+					const batchItems = await this.loadItemBatchForLocalStorage(offset, adaptiveBatchSize);
+					const loadTime = Date.now() - startTime;
+					
+					// Adaptive batch sizing: reduce size if loading is slow
+					if (loadTime > 10000) { // If batch takes more than 10 seconds
+						adaptiveBatchSize = Math.max(Math.floor(adaptiveBatchSize * 0.5), 50); // Reduce by 50%, minimum 50
+						console.log(`⚡ Reducing batch size to ${adaptiveBatchSize} due to slow loading (${loadTime}ms)`);
+						frappe.show_alert({
+							message: __(`Reducing batch size to ${adaptiveBatchSize} for better performance`),
+							indicator: "blue"
+						}, 2);
+					} else if (loadTime < 3000 && adaptiveBatchSize < batchSize) { // If loading is fast, increase size
+						adaptiveBatchSize = Math.min(Math.floor(adaptiveBatchSize * 1.2), batchSize); // Increase by 20%, max original size
+						console.log(`⚡ Increasing batch size to ${adaptiveBatchSize} due to fast loading (${loadTime}ms)`);
+					}
 					
 					if (batchItems && batchItems.length > 0) {
 						allItems = [...allItems, ...batchItems];
 						offset += batchItems.length;
 						
-						// Update UI periodically to show progress
-						if (batchCount % 2 === 0) {
-							vm.items = [...allItems];
-							vm.eventBus.emit("set_all_items", vm.items);
-							
-							frappe.show_alert({
-								message: __(`Loading items... ${allItems.length} loaded`),
-								indicator: "blue"
-							}, 1);
-							
-							// Allow UI to update
-							await new Promise(resolve => setTimeout(resolve, 50));
-						}
+						// Update UI every batch for better feedback
+						vm.items = [...allItems];
+						vm.eventBus.emit("set_all_items", vm.items);
+						
+						frappe.show_alert({
+							message: __(`Loading items... ${allItems.length} loaded (batch ${batchCount})`),
+							indicator: "blue"
+						}, 1);
+						
+						// Allow UI to update and prevent blocking
+						await new Promise(resolve => setTimeout(resolve, 100));
 						
 						// Check if we got fewer items than requested (indicates end)
-						if (batchItems.length < batchSize) {
+						if (batchItems.length < adaptiveBatchSize) {
 							hasMoreItems = false;
 						}
 						
-						// Safety check to prevent infinite loops
-						if (offset > 100000) {
-							console.warn("Safety limit reached, stopping at 100,000 items");
+						// Reduced safety limit for VPS compatibility
+						if (offset > this.maxLocalStorageItems) {
+							console.warn(`VPS safety limit reached, stopping at ${this.maxLocalStorageItems} items`);
+							frappe.show_alert({
+								message: __(`Reached limit of ${this.maxLocalStorageItems} items for VPS performance.`),
+								indicator: "orange"
+							}, 3);
 							hasMoreItems = false;
 						}
 					} else {
@@ -996,6 +1071,16 @@ export default {
 				throw new Error("POS Profile not available");
 			}
 			
+			// Check circuit breaker before making API call
+			if (this.isCircuitBreakerOpen()) {
+				console.log("Circuit breaker is open - skipping API call");
+				frappe.show_alert({
+					message: __("Server protection active. Please wait..."),
+					indicator: "orange"
+				}, 2);
+				return [];
+			}
+			
 			try {
 				const response = await new Promise((resolve, reject) => {
 					frappe.call({
@@ -1010,7 +1095,7 @@ export default {
 							offset: offset,
 						},
 						freeze: false,
-						timeout: 60000, // 60 second timeout for large batches
+						timeout: 30000, // Reduced timeout for VPS compatibility
 						callback: resolve,
 						error: reject
 					});
@@ -1018,6 +1103,7 @@ export default {
 				
 				if (response.message && Array.isArray(response.message)) {
 					console.log(`Loaded batch: ${response.message.length} items (offset: ${offset})`);
+					this.recordCircuitBreakerSuccess(); // Record successful call
 					return response.message;
 				} else {
 					console.warn("Invalid response format:", response);
@@ -1026,12 +1112,22 @@ export default {
 				
 			} catch (error) {
 				console.error(`Error loading batch at offset ${offset}:`, error);
+				this.recordCircuitBreakerFailure(); // Record failure
 				
-				// Retry logic
+				// Enhanced retry logic with exponential backoff for VPS
 				for (let retry = 1; retry <= this.localStorageLoadingConfig.maxRetries; retry++) {
 					console.log(`Retrying batch load (attempt ${retry}/${this.localStorageLoadingConfig.maxRetries})`);
 					
-					await new Promise(resolve => setTimeout(resolve, this.localStorageLoadingConfig.retryDelay));
+					// Check circuit breaker before retry
+					if (this.isCircuitBreakerOpen()) {
+						console.log("Circuit breaker opened during retry - stopping");
+						return [];
+					}
+					
+					// Exponential backoff: wait longer on each retry
+					const backoffDelay = this.localStorageLoadingConfig.retryDelay * Math.pow(2, retry - 1);
+					console.log(`⏳ Waiting ${backoffDelay}ms before retry...`);
+					await new Promise(resolve => setTimeout(resolve, backoffDelay));
 					
 					try {
 						const retryResponse = await new Promise((resolve, reject) => {
@@ -1047,7 +1143,7 @@ export default {
 									offset: offset,
 								},
 								freeze: false,
-								timeout: 60000,
+								timeout: 30000, // Consistent timeout
 								callback: resolve,
 								error: reject
 							});
@@ -1055,12 +1151,24 @@ export default {
 						
 						if (retryResponse.message && Array.isArray(retryResponse.message)) {
 							console.log(`Retry successful: ${retryResponse.message.length} items`);
+							this.recordCircuitBreakerSuccess(); // Record successful retry
 							return retryResponse.message;
 						}
 					} catch (retryError) {
 						console.error(`Retry ${retry} failed:`, retryError);
+						this.recordCircuitBreakerFailure(); // Record retry failure
+						
 						if (retry === this.localStorageLoadingConfig.maxRetries) {
 							console.error("All retries failed, returning empty array");
+							
+							// Check if circuit breaker opened due to failures
+							if (this.isCircuitBreakerOpen()) {
+								frappe.show_alert({
+									message: __("Too many failures. Pausing for server protection."),
+									indicator: "red"
+								}, 5);
+							}
+							
 							return [];
 						}
 					}
@@ -1221,14 +1329,48 @@ export default {
 		show_coupons() {
 			this.eventBus.emit("show_coupons", "true");
 		},
-		async forceReloadItems() {
+
+		shouldIncludeItemInCurrentView(item) {
+			// Check if the item should be included in current view based on filters
+			
+			// If we have an active search, the item should match the search
+			if (this.searchValue && this.searchValue.trim()) {
+				const search = this.searchValue.toLowerCase();
+				const matchesSearch = (
+					(item.item_name && item.item_name.toLowerCase().includes(search)) ||
+					(item.item_code && item.item_code.toLowerCase().includes(search)) ||
+					(item.description && item.description.toLowerCase().includes(search))
+				);
+				if (!matchesSearch) return false;
+			}
+			
+			// If we have an item group filter, check if item matches
+			if (this.item_group && this.item_group !== "ALL" && this.item_group !== "") {
+				if (item.item_group !== this.item_group) return false;
+			}
+			
+			// If display_items_in_stock is enabled, check stock
+			if (this.pos_profile && this.pos_profile.posa_display_items_in_stock) {
+				if (!item.actual_qty || item.actual_qty <= 0) return false;
+			}
+			
+			// Item should be included
+			return true;
+		},
+
+		async forceReloadItems(silent = false) {
 			console.log("Force reloading items via button...");
 			
-			// Show loading message
-			frappe.show_alert({
-				message: __("Reloading all items..."),
-				indicator: "blue"
-			}, 3);
+			// Show loading message only if not silent
+			if (!silent) {
+				frappe.show_alert({
+					message: __("Reloading all items..."),
+					indicator: "blue"
+				}, 3);
+			}
+			
+			// Clear smart sync pending changes
+			this.smartSync.pendingChanges.clear();
 			
 			// Clear all caches
 			this.search_cache.clear();
@@ -1285,6 +1427,257 @@ export default {
 			// Fallback to regular loading
 			this.get_items(true);
 		},
+
+		async performSmartSync() {
+			if (!this.pos_profile || !this.pos_profile.name) {
+				throw new Error("POS Profile not available for Smart Sync");
+			}
+
+			// Check if offline
+			if (isOffline()) {
+				throw new Error("Cannot perform Smart Sync while offline");
+			}
+
+			try {
+				// Get last sync time - if null, will let backend handle 24h fallback
+				const lastSyncTime = getItemsLastSync();
+				
+				console.log("🔄 Smart Sync starting...");
+				console.log("Last sync time:", lastSyncTime);
+				console.log("POS Profile:", this.pos_profile?.name);
+				console.log("Price List:", this.customer_price_list);
+				
+				this.eventBus.emit("show_message", {
+					title: "Checking for changes...",
+					color: "info",
+				});
+
+				// Check for changes using backend API
+				const changeCheckResponse = await frappe.call({
+					method: "posawesome.posawesome.api.items.check_for_changes",
+					args: {
+						pos_profile: JSON.stringify(this.pos_profile),
+						price_list: this.customer_price_list,
+						modified_after: lastSyncTime
+					}
+				});
+
+				const changeData = changeCheckResponse.message;
+				console.log("🔄 Change detection response:", changeData);
+				
+				if (!changeData.has_changes) {
+					console.log("🔄 No changes detected, debug info:", changeData.debug_info);
+					
+					// Silent mode - no notification for no changes
+					// this.eventBus.emit("show_message", {
+					// 	title: `No changes detected ${lastSyncTime ? 'since last sync' : 'in last 24 hours'}`,
+					// 	color: "success",
+					// });
+					
+					// Set sync time even if no changes (to establish baseline for next sync)
+					if (!lastSyncTime) {
+						setItemsLastSync(new Date().toISOString());
+						console.log("🔄 Initialized sync baseline time");
+					}
+					return;
+				}
+
+				// Build detailed change summary
+				const changeSummary = [];
+				if (changeData.item_changes_count > 0) {
+					changeSummary.push(`${changeData.item_changes_count} item updates`);
+				}
+				if (changeData.price_changes_count > 0) {
+					changeSummary.push(`${changeData.price_changes_count} price changes`);
+				}
+				if (changeData.uom_changes_count > 0) {
+					changeSummary.push(`${changeData.uom_changes_count} UOM changes`);
+				}
+				if (changeData.barcode_changes_count > 0) {
+					changeSummary.push(`${changeData.barcode_changes_count} barcode changes`);
+				}
+				if (changeData.customer_changes_count > 0) {
+					changeSummary.push(`${changeData.customer_changes_count} customer changes`);
+				}
+				if (changeData.item_group_changes_count > 0) {
+					changeSummary.push(`${changeData.item_group_changes_count} item group changes`);
+				}
+				if (changeData.batch_changes_count > 0) {
+					changeSummary.push(`${changeData.batch_changes_count} batch changes`);
+				}
+				if (changeData.serial_changes_count > 0) {
+					changeSummary.push(`${changeData.serial_changes_count} serial number changes`);
+				}
+				if (changeData.stock_changes_count > 0) {
+					changeSummary.push(`${changeData.stock_changes_count} stock changes`);
+				}
+
+				console.log("Smart Sync detected changes:", changeData);
+
+				const changedItemCodes = changeData.changed_items || [];
+				
+				// Show brief sync notification with total counts only
+				const totalChanges = changeData.total_item_changes + changeData.customer_changes_count + changeData.item_group_changes_count;
+				
+				this.eventBus.emit("show_message", {
+					title: `Syncing ${totalChanges} changes...`,
+					color: "info",
+					timeout: 1500  // Auto-dismiss after 1.5 seconds
+				});
+
+				// If there are changed items, sync them silently
+				if (changedItemCodes.length > 0) {
+					// Get updated data for changed items only
+					const updatedItemsResponse = await frappe.call({
+						method: "posawesome.posawesome.api.items.get_items_by_codes",
+						args: {
+							pos_profile: JSON.stringify(this.pos_profile),
+							price_list: this.customer_price_list,
+							item_codes: JSON.stringify(changedItemCodes)
+						}
+					});
+
+					const updatedItems = updatedItemsResponse.message || [];
+					
+					console.log("🔄 Smart Sync received updated items:", updatedItems.length, updatedItems);
+					
+					if (updatedItems.length > 0) {
+						// Update items in local cache selectively
+						let updatedCount = 0;
+						let newItemsCount = 0;
+						
+						// Update items in the current view and add new items
+						for (const updatedItem of updatedItems) {
+							// Find and update in current items array
+							const existingIndex = this.items.findIndex(item => item.item_code === updatedItem.item_code);
+							if (existingIndex !== -1) {
+								// Update existing item using splice for universal Vue compatibility
+								// Ensure all properties are updated, especially rate and actual_qty
+								const updatedItemData = {
+									...this.items[existingIndex],
+									...updatedItem,
+									rate: parseFloat(updatedItem.rate || 0),
+									price_list_rate: parseFloat(updatedItem.price_list_rate || 0),
+									actual_qty: parseFloat(updatedItem.actual_qty || 0)
+								};
+								console.log(`🔄 Updating item ${updatedItem.item_code}: rate ${this.items[existingIndex].rate} -> ${updatedItemData.rate}, qty ${this.items[existingIndex].actual_qty} -> ${updatedItemData.actual_qty}`);
+								// Use splice to replace the item for proper reactivity
+								this.items.splice(existingIndex, 1, updatedItemData);
+								updatedCount++;
+							} else {
+								// Add new item to current view if it matches current filters
+								if (this.shouldIncludeItemInCurrentView(updatedItem)) {
+									// Ensure proper data types for new item
+									const newItemData = {
+										...updatedItem,
+										rate: parseFloat(updatedItem.rate || 0),
+										price_list_rate: parseFloat(updatedItem.price_list_rate || 0),
+										actual_qty: parseFloat(updatedItem.actual_qty || 0)
+									};
+									this.items.push(newItemData);
+									newItemsCount++;
+								}
+							}
+						}
+
+						// Update items in local storage if enabled
+						if (this.pos_profile.posa_local_storage) {
+							try {
+								const cacheKey = `items_${this.customer_price_list}`;
+								const cachedItemsStr = localStorage.getItem(cacheKey);
+								
+								if (cachedItemsStr) {
+									const cachedItems = JSON.parse(cachedItemsStr);
+									let cacheUpdated = false;
+									
+									for (const updatedItem of updatedItems) {
+										const cacheIndex = cachedItems.findIndex(item => item.item_code === updatedItem.item_code);
+										if (cacheIndex !== -1) {
+											// Update existing item in cache with proper data types
+											const updatedCacheItem = {
+												...cachedItems[cacheIndex],
+												...updatedItem,
+												rate: parseFloat(updatedItem.rate || 0),
+												price_list_rate: parseFloat(updatedItem.price_list_rate || 0),
+												actual_qty: parseFloat(updatedItem.actual_qty || 0)
+											};
+											cachedItems[cacheIndex] = updatedCacheItem;
+											cacheUpdated = true;
+										} else {
+											// Add new item to cache with proper data types
+											const newCacheItem = {
+												...updatedItem,
+												rate: parseFloat(updatedItem.rate || 0),
+												price_list_rate: parseFloat(updatedItem.price_list_rate || 0),
+												actual_qty: parseFloat(updatedItem.actual_qty || 0)
+											};
+											cachedItems.push(newCacheItem);
+											cacheUpdated = true;
+										}
+									}
+									
+									if (cacheUpdated) {
+										localStorage.setItem(cacheKey, JSON.stringify(cachedItems));
+										console.log(`Updated ${updatedCount} items and added ${newItemsCount} new items in cache`);
+									}
+								}
+							} catch (error) {
+								console.error("Error updating localStorage cache:", error);
+							}
+						}
+						
+						// Force Vue reactivity update
+						this.$forceUpdate();
+
+						console.log(`Smart Sync updated ${updatedCount} items and added ${newItemsCount} new items in view`);
+					}
+				}
+
+				// Handle customer changes
+				if (changeData.customer_changes_count > 0) {
+					// Silent customer refresh - no notification
+					// this.eventBus.emit("show_message", {
+					// 	title: `Refreshing customer data (${changeData.customer_changes_count} changes)...`,
+					// 	color: "info",
+					// });
+					// Trigger silent customer refresh in other components
+					this.eventBus.emit("refresh_customers", { silent: true });
+				}
+
+				// Handle item group changes
+				if (changeData.item_group_changes_count > 0) {
+					// Silent item group refresh - no notification
+					// this.eventBus.emit("show_message", {
+					// 	title: `Refreshing item groups (${changeData.item_group_changes_count} changes)...`,
+					// 	color: "info",
+					// });
+					// You could add item group refresh logic here if needed
+				}
+
+				// Update last sync time
+				setItemsLastSync(new Date().toISOString());
+
+				// NO force items reload - Smart Sync should only update cache selectively
+				// The selective cache updates above should be sufficient
+				console.log("🔄 Smart Sync completed - items updated in cache only");
+
+				// Force reactivity update
+				this.$forceUpdate();
+
+				// Silent completion - no final success message
+				// const finalMessage = `Successfully synced: ${changeSummary.join(", ")}`;
+				// this.eventBus.emit("show_message", {
+				// 	title: finalMessage,
+				// 	color: "success",
+				// });
+				console.log(`✅ Smart Sync completed: ${changeSummary.join(", ")}`);
+
+			} catch (error) {
+				console.error("Smart Sync failed:", error);
+				throw error;
+			}
+		},
+
 		async get_items(force_server = false) {
 			await initPromise;
 			await checkDbHealth();
@@ -3432,6 +3825,379 @@ export default {
 				checkProfile();
 			});
 		},
+		
+		// VPS optimization: Circuit breaker methods
+		isCircuitBreakerOpen() {
+			if (!this.circuitBreaker.isOpen) return false;
+			
+			// Check if we should reset the circuit breaker
+			const now = Date.now();
+			if (now - this.circuitBreaker.lastFailureTime > this.circuitBreaker.resetTimeout) {
+				this.circuitBreaker.isOpen = false;
+				this.circuitBreaker.failures = 0;
+				console.log("Circuit breaker reset - allowing API calls again");
+				return false;
+			}
+			
+			return true;
+		},
+		
+		recordCircuitBreakerFailure() {
+			this.circuitBreaker.failures++;
+			this.circuitBreaker.lastFailureTime = Date.now();
+			
+			if (this.circuitBreaker.failures >= this.circuitBreaker.maxFailures) {
+				this.circuitBreaker.isOpen = true;
+				console.warn(`Circuit breaker opened after ${this.circuitBreaker.failures} failures - blocking API calls for ${this.circuitBreaker.resetTimeout/1000}s`);
+				
+				frappe.show_alert({
+					message: __("Server overloaded. Pausing requests for 30 seconds..."),
+					indicator: "orange"
+				}, 5);
+			}
+		},
+		
+		recordCircuitBreakerSuccess() {
+			this.circuitBreaker.failures = 0;
+		},
+
+		// ===== SMART SYNC METHODS =====
+		
+		/**
+		 * Initialize smart sync system
+		 */
+		initSmartSync() {
+			if (!this.smartSync.enabled) {
+				console.log("Smart sync is disabled");
+				return;
+			}
+			
+			console.log("🔄 Initializing smart sync system");
+			
+			// Start background sync interval
+			if (this.smartSync.backgroundSyncInterval) {
+				clearInterval(this.smartSync.backgroundSyncInterval);
+			}
+			
+			this.smartSync.backgroundSyncInterval = setInterval(() => {
+				this.checkForChanges();
+			}, this.smartSync.checkInterval);
+			
+			// Listen for relevant events that might indicate changes
+			this.eventBus.on('item_price_updated', (itemCode) => {
+				this.smartSync.pendingChanges.add(itemCode);
+			});
+			
+			this.eventBus.on('item_stock_updated', (itemCode) => {
+				this.smartSync.pendingChanges.add(itemCode);
+			});
+			
+			// Check for changes when POS is activated/focused
+			window.addEventListener('focus', () => {
+				setTimeout(() => this.checkForChanges(), 1000);
+			});
+		},
+
+		/**
+		 * Check for changes on the server since last sync
+		 */
+		async checkForChanges() {
+			if (!this.smartSync.enabled) {
+				return;
+			}
+			
+			// Don't check too frequently
+			const now = Date.now();
+			if (this.smartSync.lastChangeCheck && (now - this.smartSync.lastChangeCheck) < 60000) {
+				return;
+			}
+			
+			this.smartSync.lastChangeCheck = now;
+			
+			try {
+				console.log("🔍 Checking for server changes...");
+				
+				const lastSync = getItemsLastSync();
+				if (!lastSync) {
+					console.log("No last sync time found, skipping change check");
+					return;
+				}
+				
+				const response = await new Promise((resolve, reject) => {
+					frappe.call({
+						method: "posawesome.posawesome.api.items.check_for_changes",
+						args: {
+							pos_profile: JSON.stringify(this.pos_profile),
+							price_list: this.customer_price_list,
+							modified_after: lastSync,
+						},
+						freeze: false,
+						timeout: 10000,
+						callback: resolve,
+						error: reject
+					});
+				});
+				
+				if (response.message && response.message.has_changes) {
+					console.log("📝 Server changes detected:", response.message);
+					
+					const changeInfo = response.message;
+					await this.handleServerChanges(changeInfo);
+				} else {
+					console.log("✅ No changes detected on server");
+				}
+				
+			} catch (error) {
+				console.error("Error checking for changes:", error);
+				// Don't show error to user for background checks
+			}
+		},
+
+		/**
+		 * Handle detected server changes
+		 */
+		async handleServerChanges(changeInfo) {
+			const { changed_items = [], price_changes = [], stock_changes = [] } = changeInfo;
+			
+			console.log(`🔄 Processing ${changed_items.length} changed items`);
+			
+			if (changed_items.length === 0) {
+				return;
+			}
+			
+			// For small number of changes, update selectively
+			if (changed_items.length <= 50) {
+				await this.updateChangedItems(changed_items);
+				
+				frappe.show_alert({
+					message: __(`Updated ${changed_items.length} changed items`),
+					indicator: "blue"
+				}, 3);
+			} else {
+				// For large number of changes, suggest full refresh
+				const shouldRefresh = await this.askUserForFullRefresh(changed_items.length);
+				
+				if (shouldRefresh) {
+					await this.forceReloadItems();
+				} else {
+					// Update in batches
+					await this.updateChangedItemsInBatches(changed_items);
+				}
+			}
+		},
+
+		/**
+		 * Update specific changed items without full reload
+		 */
+		async updateChangedItems(changedItemCodes) {
+			try {
+				console.log("🔄 Updating changed items:", changedItemCodes);
+				
+				// Fetch updated data for changed items
+				const response = await new Promise((resolve, reject) => {
+					frappe.call({
+						method: "posawesome.posawesome.api.items.get_items_by_codes",
+						args: {
+							pos_profile: JSON.stringify(this.pos_profile),
+							price_list: this.customer_price_list,
+							item_codes: changedItemCodes,
+						},
+						freeze: false,
+						callback: resolve,
+						error: reject
+					});
+				});
+				
+				if (response.message && response.message.length > 0) {
+					const updatedItems = response.message;
+					
+					// Update items in memory using Vue reactivity
+					updatedItems.forEach(updatedItem => {
+						const existingIndex = this.items.findIndex(item => item.item_code === updatedItem.item_code);
+						
+						if (existingIndex !== -1) {
+							// Update existing item using splice for reactivity
+							const mergedItem = { ...this.items[existingIndex], ...updatedItem };
+							this.items.splice(existingIndex, 1, mergedItem);
+							console.log(`🔄 Updated item ${updatedItem.item_code} with new rate: ${updatedItem.rate}`);
+						} else {
+							// Add new item
+							this.items.push(updatedItem);
+							console.log(`➕ Added new item ${updatedItem.item_code} with rate: ${updatedItem.rate}`);
+						}
+						
+						// Remove from pending changes
+						this.smartSync.pendingChanges.delete(updatedItem.item_code);
+					});
+					
+					// Update cache
+					await savePriceListItems(this.customer_price_list, this.items);
+					await saveItems(this.items);
+					
+					// Force Vue reactivity update for filtered_items computed property
+					this.$forceUpdate();
+					
+					// Emit update event
+					this.eventBus.emit("set_all_items", this.items);
+					
+					// Update last sync time
+					setItemsLastSync(new Date().toISOString());
+					
+					console.log(`✅ Successfully updated ${updatedItems.length} items with reactive changes`);
+				}
+				
+			} catch (error) {
+				console.error("Error updating changed items:", error);
+				frappe.show_alert({
+					message: __("Failed to update some items. Consider refreshing."),
+					indicator: "orange"
+				}, 3);
+			}
+		},
+
+		/**
+		 * Ask user if they want to do a full refresh
+		 */
+		async askUserForFullRefresh(changeCount) {
+			return new Promise((resolve) => {
+				frappe.confirm(
+					__(`${changeCount} items have changed on the server. Do you want to refresh all items now?`),
+					() => resolve(true),  // Yes
+					() => resolve(false)  // No
+				);
+			});
+		},
+
+		/**
+		 * Update changed items in smaller batches
+		 */
+		async updateChangedItemsInBatches(changedItemCodes, batchSize = 20) {
+			const batches = [];
+			for (let i = 0; i < changedItemCodes.length; i += batchSize) {
+				batches.push(changedItemCodes.slice(i, i + batchSize));
+			}
+			
+			console.log(`🔄 Updating ${changedItemCodes.length} items in ${batches.length} batches`);
+			
+			for (let i = 0; i < batches.length; i++) {
+				try {
+					await this.updateChangedItems(batches[i]);
+					
+					// Show progress
+					frappe.show_alert({
+						message: __(`Updating items... ${Math.round(((i + 1) / batches.length) * 100)}%`),
+						indicator: "blue"
+					}, 1);
+					
+					// Small delay to prevent server overload
+					await new Promise(resolve => setTimeout(resolve, 500));
+					
+				} catch (error) {
+					console.error(`Error updating batch ${i + 1}:`, error);
+				}
+			}
+			
+			frappe.show_alert({
+				message: __("Item updates completed"),
+				indicator: "green"
+			}, 3);
+		},
+
+		/**
+		 * Force check and sync any pending changes - Enhanced with fallback
+		 */
+		async forceSyncPendingChanges() {
+			if (this.syncInProgress) {
+				console.log("🔄 Sync already in progress, skipping");
+				return;
+			}
+
+			this.syncInProgress = true;
+			console.log("🔄 Force sync triggered, pending changes:", this.smartSync.pendingChanges.size);
+			
+			try {
+				// If no pending changes, try running the full Smart Sync check
+				if (this.smartSync.pendingChanges.size === 0) {
+					console.log("🔄 No pending changes, running full Smart Sync check");
+					
+					try {
+						await this.performSmartSync();
+						
+						frappe.show_alert({
+							message: __("Smart Sync completed"),
+							indicator: "green"
+						}, 3);
+					} catch (error) {
+						console.error("🔄 Smart Sync failed, falling back to force reload:", error);
+						
+						// Fallback: Force reload items from server to get fresh data
+						console.log("🔄 Fallback: Force reloading all items from server");
+						
+						this.eventBus.emit("show_message", {
+							title: "Refreshing items...",
+							color: "info",
+						});
+						
+						// Clear cache and force reload
+						this.clearItemsCache();
+						await this.get_items(true); // Force server reload
+						
+						frappe.show_alert({
+							message: __("Items refreshed from server"),
+							indicator: "blue"
+						}, 3);
+					}
+					return;
+				}
+				
+				// Handle pending changes
+				const pendingCodes = Array.from(this.smartSync.pendingChanges);
+				console.log("🔄 Force syncing pending changes:", pendingCodes);
+				
+				try {
+					await this.updateChangedItems(pendingCodes);
+					
+					frappe.show_alert({
+						message: __(`Synced ${pendingCodes.length} pending changes`),
+						indicator: "green"
+					}, 3);
+				} catch (error) {
+					console.error("🔄 Error syncing pending changes, falling back:", error);
+					
+					// Fallback: Force reload specific items or all items
+					console.log("🔄 Fallback: Force reloading items from server");
+					
+					this.clearItemsCache();
+					await this.get_items(true);
+					
+					frappe.show_alert({
+						message: __("Items refreshed from server"),
+						indicator: "blue"
+					}, 3);
+				}
+			} catch (error) {
+				console.error("🔄 Critical error in force sync:", error);
+				frappe.show_alert({
+					message: __("Sync failed: ") + error.message,
+					indicator: "red"
+				}, 5);
+			} finally {
+				this.syncInProgress = false;
+			}
+		},
+
+		/**
+		 * Cleanup smart sync resources
+		 */
+		cleanupSmartSync() {
+			if (this.smartSync.backgroundSyncInterval) {
+				clearInterval(this.smartSync.backgroundSyncInterval);
+				this.smartSync.backgroundSyncInterval = null;
+			}
+			
+			this.smartSync.pendingChanges.clear();
+			console.log("🔄 Smart sync cleanup completed");
+		},
 	},
 
 	computed: {
@@ -3849,6 +4615,46 @@ export default {
 			this.applyCurrencyConversionToItems();
 			this.update_cur_items_details();
 		});
+
+		// Add event listener for Smart Sync trigger from navbar
+		this.eventBus.on("trigger-smart-sync", async () => {
+			try {
+				await this.performSmartSync();
+			} catch (error) {
+				console.error("Smart sync failed:", error);
+				this.eventBus.emit("show_message", {
+					title: "Smart sync failed: " + error.message,
+					color: "error",
+				});
+			}
+		});
+	},
+
+	// Method to clear items cache (called by sync operations)
+	clearItemsCache() {
+		console.log("🗑️ Clearing items cache...");
+		
+		// Clear the main items array and loading flags
+		this.items = [];
+		this.items_loaded = false;
+		this.search_cache.clear();
+
+		// Clear local storage cache if enabled
+		if (this.pos_profile && this.pos_profile.posa_local_storage) {
+			try {
+				const cacheKeys = [
+					`items_${this.customer_price_list}`,
+					`items_cache_${this.customer_price_list}`,
+					'posawesome_items_last_sync'
+				];
+				cacheKeys.forEach(key => {
+					localStorage.removeItem(key);
+				});
+				console.log("🗑️ Cleared localStorage cache");
+			} catch (e) {
+				console.error("Failed to clear localStorage cache:", e);
+			}
+		}
 	},
 
 	async mounted() {
@@ -3926,9 +4732,18 @@ export default {
 		window.debugItemsState = () => this.debugItemsState();
 		window.testItemsLoad = () => this.testItemsLoad();
 		window.ensureItemsVisible = () => this.ensureItemsVisible();
+		window.forceSyncChanges = () => this.forceSyncPendingChanges();
+		window.checkForChanges = () => this.checkForChanges();
 		console.log("ItemsSelector mounted. Debug with: window.debugItemsState()");
 		console.log("Test items loading with: window.testItemsLoad()");
 		console.log("Ensure items visible with: window.ensureItemsVisible()");
+		console.log("Force sync changes with: window.forceSyncChanges()");
+		console.log("Manual check for changes with: window.checkForChanges()");
+		
+		// Initialize smart sync system
+		setTimeout(() => {
+			this.initSmartSync();
+		}, 5000); // Initialize after 5 seconds to allow POS to settle
 	},
 
 	beforeUnmount() {
@@ -3946,6 +4761,9 @@ export default {
 		if (this.cleanupBeforeDestroy) {
 			this.cleanupBeforeDestroy();
 		}
+		
+		// Cleanup smart sync system
+		this.cleanupSmartSync();
 
 		// Detach scanner if it was attached
 		if (document._scannerAttached) {

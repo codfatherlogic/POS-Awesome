@@ -304,8 +304,8 @@ export function useItemAddition() {
 		context.additional_discount_percentage = 0;
 		context.delivery_charges_rate = 0;
 		context.selected_delivery_charge = "";
-		// Reset posting date to today
-		context.posting_date = frappe.datetime.nowdate();
+		// Don't reset posting date - let user keep their selected date
+		// context.posting_date = frappe.datetime.nowdate();
 
 		// Reset price list to default
 		if (context.update_price_list) context.update_price_list();
