@@ -965,20 +965,16 @@ export default {
 				await this.waitForPosProfile();
 			} catch (error) {
 				console.error("loadAllItemsForLocalStorage: POS Profile not available:", error);
-				frappe.show_alert({
-					message: __("POS Profile is not loaded. Please refresh the page."),
-					indicator: "red"
-				}, 5);
+				this.setLoadingMessage(__("⚠️ POS Profile loading failed. Please refresh the page or check your connection."));
+				setTimeout(() => this.clearLoadingMessage(), 8000);
 				return false;
 			}
 			
 			// Validate POS Profile first
 			if (!vm.pos_profile?.name) {
 				console.error("loadAllItemsForLocalStorage: POS Profile not available or invalid");
-				frappe.show_alert({
-					message: __("POS Profile is not loaded. Please refresh the page."),
-					indicator: "red"
-				}, 5);
+				this.setLoadingMessage(__("⚠️ POS Profile is not configured. Please contact your administrator."));
+				setTimeout(() => this.clearLoadingMessage(), 8000);
 				return false;
 			}
 			
@@ -3910,34 +3906,39 @@ export default {
 			}
 		},
 		
-		async waitForPosProfile(maxWaitTime = 10000) {
+		async waitForPosProfile(maxWaitTime = 15000) {
 			// If POS profile is already available, return immediately
 			if (this.pos_profile && this.pos_profile.name) {
 				return true;
 			}
 			
-			console.log("Waiting for POS Profile to be available...");
+			console.log("⏳ Waiting for POS Profile to be available...");
 			
 			return new Promise((resolve, reject) => {
 				let attempts = 0;
-				const maxAttempts = maxWaitTime / 100; // Check every 100ms
+				const maxAttempts = maxWaitTime / 500; // Check every 500ms
 				
 				const checkProfile = () => {
 					attempts++;
 					
 					if (this.pos_profile && this.pos_profile.name) {
-						console.log("POS Profile is now available:", this.pos_profile.name);
+						console.log("✅ POS Profile is now available:", this.pos_profile.name);
 						resolve(true);
 						return;
 					}
 					
 					if (attempts >= maxAttempts) {
-						console.error("Timeout waiting for POS Profile");
-						reject(new Error("Timeout waiting for POS Profile"));
+						console.error("❌ Timeout waiting for POS Profile after", maxWaitTime / 1000, "seconds");
+						reject(new Error(`Timeout waiting for POS Profile after ${maxWaitTime / 1000} seconds`));
 						return;
 					}
 					
-					setTimeout(checkProfile, 100);
+					// Show progress every 2 seconds
+					if (attempts % 4 === 0) {
+						console.log(`⏳ Still waiting for POS Profile... (${Math.round(attempts * 500 / 1000)}s elapsed)`);
+					}
+					
+					setTimeout(checkProfile, 500);
 				};
 				
 				checkProfile();
