@@ -262,6 +262,12 @@ fixtures = [
 					"POS Profile-posa_enable_camera_scanning",
 					"POS Profile-posa_camera_scan_type",
 					"POS Profile-posa_language",
+					"Item-custom_oem_part_number",
+					"POS Profile-custom_pos_awesome_more_settings",
+					"POS Profile-posa_show_oem_part_number_in_list",
+					"POS Profile-show_last_purchase_rate_in_list",
+					"POS Profile-show_last_purchase_rate_in_cart",
+					"POS Profile-custom_show_last_custom_rate",
 				),
 			]
 		],

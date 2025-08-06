@@ -281,6 +281,11 @@ export function useItemAddition() {
 		if (new_item.item_uoms.length === 0 && new_item.stock_uom) {
 			new_item.item_uoms.push({ uom: new_item.stock_uom, conversion_factor: 1 });
 		}
+		
+		// Add rate information if available
+		new_item.last_purchase_rate = item.last_purchase_rate || 0;
+		new_item.last_customer_rate = item.last_customer_rate || 0;
+		
 		new_item.actual_batch_qty = "";
 		new_item.batch_no_expiry_date = item.batch_no_expiry_date || null;
 		new_item.conversion_factor = 1;

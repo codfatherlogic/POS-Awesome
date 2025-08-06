@@ -453,6 +453,21 @@ def get_items(
 				item_stock_qty = 0
 				if pos_profile.get("posa_display_items_in_stock") or use_limit_search:
 					item_stock_qty = get_stock_availability(item_code, pos_profile.get("warehouse"))
+				
+				# Fetch customer rate if enabled and customer is provided
+				customer_rate = 0
+				if pos_profile.get("custom_show_last_custom_rate") and customer:
+					customer_rate_result = frappe.db.sql("""
+						SELECT sii.rate 
+						FROM `tabSales Invoice Item` sii 
+						INNER JOIN `tabSales Invoice` si ON si.name = sii.parent 
+						WHERE si.customer = %s AND sii.item_code = %s AND si.docstatus = 1 
+						ORDER BY si.posting_date DESC, si.creation DESC 
+						LIMIT 1
+					""", (customer, item_code), as_dict=True)
+					if customer_rate_result:
+						customer_rate = customer_rate_result[0].get("rate", 0)
+				
 				attributes = ""
 				if pos_profile.get("posa_show_template_items") and item.has_variants:
 					attributes = get_item_attributes(item.item_code)
@@ -481,6 +496,8 @@ def get_items(
 							"attributes": attributes or "",
 							"item_attributes": item_attributes or "",
 							"item_uoms": uoms or [],
+							"customer_rate": customer_rate or 0,
+							"last_customer_rate": customer_rate or 0,
 						}
 					)
 					result.append(row)

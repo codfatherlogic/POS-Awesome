@@ -38,6 +38,59 @@ def get_item_group_condition(pos_profile):
 	return cond % tuple(item_groups)
 
 
+def get_last_purchase_rate(item_code, warehouse=None):
+	"""Get the last purchase rate (valuation rate) from BIN for an item."""
+	try:
+		# Get valuation rate from BIN
+		bin_data = frappe.db.get_value(
+			"Bin",
+			{"item_code": item_code, "warehouse": warehouse} if warehouse else {"item_code": item_code},
+			["valuation_rate"],
+			order_by="modified desc"
+		)
+		return bin_data or 0
+	except Exception:
+		return 0
+
+
+def get_last_customer_rate(item_code, customer, price_list=None):
+	"""Get the last selling rate given to a specific customer for an item."""
+	try:
+		# Get the last rate from Sales Invoice Item for this customer
+		customer_rate = frappe.db.sql("""
+			SELECT rate 
+			FROM `tabSales Invoice Item` sii
+			INNER JOIN `tabSales Invoice` si ON sii.parent = si.name
+			WHERE sii.item_code = %s 
+			AND si.customer = %s 
+			AND si.docstatus = 1
+			ORDER BY si.posting_date DESC, si.creation DESC
+			LIMIT 1
+		""", (item_code, customer), as_dict=True)
+		
+		if customer_rate:
+			return customer_rate[0].rate
+			
+		# Fallback: Get customer-specific item price
+		if price_list:
+			item_price = frappe.db.get_value(
+				"Item Price",
+				{
+					"item_code": item_code,
+					"price_list": price_list,
+					"customer": customer,
+					"selling": 1
+				},
+				"price_list_rate",
+				order_by="valid_from desc"
+			)
+			return item_price or 0
+			
+		return 0
+	except Exception:
+		return 0
+
+
 def get_stock_availability(item_code, warehouse):
 	"""Get the latest stock quantity for an item in a specific warehouse."""
 	try:
@@ -205,6 +258,7 @@ def get_items(
 			or_filters = [
 				["name", "like", f"%{item_code}%"],
 				["item_name", "like", f"%{item_code}%"],
+				["custom_oem_part_number", "like", f"%{item_code}%"],
 			]
 
 			# Check for exact barcode match
@@ -250,6 +304,7 @@ def get_items(
 				"has_serial_no",
 				"max_discount",
 				"brand",
+				"custom_oem_part_number",
 			],
 			limit_start=limit_start,
 			limit_page_length=limit_page_length,
@@ -352,6 +407,20 @@ def get_items(
 				if posa_display_items_in_stock and (not item_stock_qty or item_stock_qty < 0):
 					pass
 				else:
+					# Get additional rate information if enabled in POS Profile
+					last_purchase_rate = 0
+					last_customer_rate = 0
+					
+					# Check if rate features are enabled
+					show_purchase_rate = pos_profile.get("show_last_purchase_rate_in_list") or pos_profile.get("show_last_purchase_rate_in_cart")
+					show_customer_rate = pos_profile.get("custom_show_last_custom_rate")
+					
+					if show_purchase_rate:
+						last_purchase_rate = get_last_purchase_rate(item_code, pos_profile.get("warehouse"))
+					
+					if show_customer_rate and customer:
+						last_customer_rate = get_last_customer_rate(item_code, customer, price_list)
+					
 					row = {}
 					row.update(item)
 					row.update(
@@ -367,6 +436,8 @@ def get_items(
 							"attributes": attributes or "",
 							"item_attributes": item_attributes or "",
 							"item_uoms": uoms or [],
+							"last_purchase_rate": last_purchase_rate,
+							"last_customer_rate": last_customer_rate,
 						}
 					)
 					result.append(row)
@@ -426,6 +497,7 @@ def get_item_variants(pos_profile, parent_item_code, price_list=None, customer=N
 		"has_serial_no",
 		"max_discount",
 		"brand",
+		"custom_oem_part_number",
 	]
 
 	items_data = frappe.get_all(
@@ -1202,6 +1274,7 @@ def get_items_by_codes(pos_profile, price_list, item_codes):
 				item.weight_uom,
 				item.max_discount,
 				item.brand,
+				item.custom_oem_part_number,
 				COALESCE(ip.price_list_rate, 0) AS rate,
 				COALESCE(ip.price_list_rate, 0) AS price_list_rate
 			FROM `tabItem` item
@@ -1265,6 +1338,23 @@ def get_items_by_codes(pos_profile, price_list, item_codes):
 			
 			# Set currency
 			item['currency'] = pos_profile.get('currency', 'USD')
+			
+			# Get additional rate information if enabled in POS Profile
+			last_purchase_rate = 0
+			last_customer_rate = 0
+			
+			# Check if rate features are enabled
+			show_purchase_rate = pos_profile.get("show_last_purchase_rate_in_list") or pos_profile.get("show_last_purchase_rate_in_cart")
+			show_customer_rate = pos_profile.get("show_last_customer_rate_in_list") or pos_profile.get("show_last_customer_rate_in_cart")
+			
+			if show_purchase_rate:
+				last_purchase_rate = get_last_purchase_rate(item.item_code, warehouse)
+			
+			# For customer rate, we would need customer info which isn't available in this context
+			# This will be handled at the frontend level when customer is selected
+			
+			item['last_purchase_rate'] = last_purchase_rate
+			item['last_customer_rate'] = last_customer_rate
 			
 			result.append(item)
 		

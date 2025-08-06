@@ -34,7 +34,7 @@
 							variant="solo"
 							color="primary"
 							:label="frappe._('Search Items')"
-							hint="Search by item code, serial number, batch no or barcode"
+							hint="Search by item code, serial number, batch no, OEM part number or barcode"
 							hide-details
 							v-model="debounce_search"
 							@keydown.esc="esc_event"
@@ -230,9 +230,13 @@
 									gradient="to bottom, rgba(0,0,0,0), rgba(0,0,0,0.4)"
 									height="100px"
 								>
-									<v-card-text class="text-caption px-1 pb-0 truncate">{{
-										item.item_name
-									}}</v-card-text>
+									<v-card-text class="text-caption px-1 pb-0 truncate">
+										{{ item.item_name }}
+										<div v-if="pos_profile.posa_show_oem_part_number_in_list && item.custom_oem_part_number" 
+											 class="text-caption text-info font-weight-medium mt-1">
+											OEM: {{ item.custom_oem_part_number }}
+										</div>
+									</v-card-text>
 								</v-img>
 								<v-card-text class="text--primary pa-1">
 									<div class="text-caption text-primary truncate">
@@ -263,6 +267,16 @@
 												ratePrecision(item.rate),
 											)
 										}}
+									</div>
+									<!-- Inc.Rate -->
+									<div v-if="pos_profile.show_last_purchase_rate_in_list && (item.last_purchase_rate > 0 || item.last_purchase_rate === 0)"
+										 class="text-caption text-warning truncate">
+										Inc.Rate: {{ item.last_purchase_rate ? (currencySymbol(pos_profile.currency) + format_currency(item.last_purchase_rate, pos_profile.currency, 2)) : 'N/A' }}
+									</div>
+									<!-- Cust.Rate -->
+									<div v-if="pos_profile.custom_show_last_custom_rate && (item.last_customer_rate > 0 || item.last_customer_rate === 0)"
+										 class="text-caption text-info truncate">
+										Cust.Rate: {{ item.last_customer_rate ? (currencySymbol(pos_profile.currency) + format_currency(item.last_customer_rate, pos_profile.currency, 2)) : 'N/A' }}
 									</div>
 									<div class="text-caption golden--text truncate">
 										{{ format_number(item.actual_qty, hide_qty_decimals ? 0 : 4) || 0 }}
@@ -317,6 +331,24 @@
 									<span class="golden--text">{{
 										format_number(item.actual_qty, hide_qty_decimals ? 0 : 4)
 									}}</span>
+								</template>
+								<template v-slot:item.custom_oem_part_number="{ item }">
+									<span v-if="item.custom_oem_part_number" class="text-info font-weight-medium">
+										{{ item.custom_oem_part_number }}
+									</span>
+									<span v-else class="text-grey">-</span>
+								</template>
+								<template v-slot:item.last_purchase_rate="{ item }">
+									<span v-if="item.last_purchase_rate > 0" class="text-warning">
+										{{ currencySymbol(pos_profile.currency) }}{{ format_currency(item.last_purchase_rate, pos_profile.currency, 2) }}
+									</span>
+									<span v-else class="text-grey">-</span>
+								</template>
+								<template v-slot:item.last_customer_rate="{ item }">
+									<span v-if="item.last_customer_rate > 0" class="text-info">
+										{{ currencySymbol(pos_profile.currency) }}{{ format_currency(item.last_customer_rate, pos_profile.currency, 2) }}
+									</span>
+									<span v-else class="text-grey">-</span>
 								</template>
 							</v-data-table-virtual>
 						</div>
@@ -1456,7 +1488,8 @@ export default {
 				const matchesSearch = (
 					(item.item_name && item.item_name.toLowerCase().includes(search)) ||
 					(item.item_code && item.item_code.toLowerCase().includes(search)) ||
-					(item.description && item.description.toLowerCase().includes(search))
+					(item.description && item.description.toLowerCase().includes(search)) ||
+					(item.custom_oem_part_number && item.custom_oem_part_number.toLowerCase().includes(search))
 				);
 				if (!matchesSearch) return false;
 			}
@@ -2606,6 +2639,37 @@ export default {
 				{ title: __("Available QTY"), key: "actual_qty", align: "start" },
 				{ title: __("UOM"), key: "stock_uom", align: "start" },
 			];
+			
+			// Add OEM Part Number column if enabled in POS Profile
+			if (this.pos_profile.posa_show_oem_part_number_in_list) {
+				items_headers.splice(2, 0, {
+					title: __("OEM Part Number"),
+					align: "start",
+					sortable: true,
+					key: "custom_oem_part_number",
+				});
+			}
+			
+			// Add Inc.Rate column if enabled in POS Profile
+			if (this.pos_profile.show_last_purchase_rate_in_list) {
+				items_headers.splice(-2, 0, {
+					title: __("Inc.Rate"),
+					align: "start",
+					sortable: true,
+					key: "last_purchase_rate",
+				});
+			}
+			
+			// Add Cust.Rate column if enabled in POS Profile
+			if (this.pos_profile.show_last_customer_rate_in_list) {
+				items_headers.splice(-2, 0, {
+					title: __("Cust.Rate"),
+					align: "start",
+					sortable: true,
+					key: "last_customer_rate",
+				});
+			}
+			
 			if (!this.pos_profile.posa_display_item_code) {
 				items_headers.splice(1, 1);
 			}
@@ -3906,43 +3970,122 @@ export default {
 			}
 		},
 		
-		async waitForPosProfile(maxWaitTime = 15000) {
+		async waitForPosProfile(maxWaitTime = 30000) {
 			// If POS profile is already available, return immediately
 			if (this.pos_profile && this.pos_profile.name) {
+				console.log("✅ POS Profile already available:", this.pos_profile.name);
 				return true;
 			}
 			
 			console.log("⏳ Waiting for POS Profile to be available...");
 			
-			return new Promise((resolve, reject) => {
+			// Prevent infinite loops by checking if we're already waiting
+			if (this._waitingForProfile) {
+				console.log("⚠️ Already waiting for POS Profile, avoiding duplicate wait");
+				return this._waitingForProfile;
+			}
+			
+			// Additional protection: Track call frequency
+			const now = Date.now();
+			if (!this._lastProfileCallTime) {
+				this._lastProfileCallTime = 0;
+			}
+			
+			// If called too frequently, return immediately with fallback
+			if (this._lastProfileCallTime && (now - this._lastProfileCallTime) < 3000) {
+				console.log("🚫 waitForPosProfile called too frequently, using fallback");
+				// Use emergency profile to prevent complete failure
+				if (!this.pos_profile || !this.pos_profile.name) {
+					this.pos_profile = { 
+						name: "Emergency Profile",
+						warehouse: "Stores - TEST",
+						selling_price_list: "Standard Selling",
+						currency: "USD",
+						posa_local_storage: false
+					};
+				}
+				return true;
+			}
+			
+			this._lastProfileCallTime = now;
+			
+			this._waitingForProfile = new Promise(async (resolve, reject) => {
 				let attempts = 0;
-				const maxAttempts = maxWaitTime / 500; // Check every 500ms
+				const maxAttempts = Math.min(maxWaitTime / 1000, 20); // Max 20 attempts, check every 1 second
+				let hasRequestedProfile = false; // Prevent multiple profile requests
+				
+				// Try to actively fetch the profile first (only once per call)
+				try {
+					console.log("🔄 Attempting to actively fetch POS Profile...");
+					const profile = await ensurePosProfile();
+					if (profile && profile.name) {
+						this.pos_profile = profile;
+						console.log("✅ Successfully fetched POS Profile:", profile.name);
+						this._waitingForProfile = null; // Clear the waiting flag
+						resolve(true);
+						return;
+					}
+				} catch (error) {
+					console.warn("⚠️ Active fetch failed, falling back to waiting:", error.message);
+				}
 				
 				const checkProfile = () => {
 					attempts++;
 					
 					if (this.pos_profile && this.pos_profile.name) {
 						console.log("✅ POS Profile is now available:", this.pos_profile.name);
+						this._waitingForProfile = null; // Clear the waiting flag
 						resolve(true);
 						return;
 					}
 					
+					// Try alternative ways to get the profile
+					if (attempts === 3) {
+						// After 3 seconds, try to get from boot
+						if (frappe?.boot?.pos_profile) {
+							console.log("📦 Found POS Profile in frappe.boot, using it");
+							this.pos_profile = frappe.boot.pos_profile;
+							this._waitingForProfile = null; // Clear the waiting flag
+							resolve(true);
+							return;
+						}
+					}
+					
+					// Only request profile once via event bus to prevent infinite loops
+					if (attempts === 5 && !hasRequestedProfile) {
+						console.log("📡 Trying to trigger POS Profile registration via event bus (once)");
+						hasRequestedProfile = true; // Set flag to prevent multiple requests
+						this.eventBus.emit('request_pos_profile');
+					}
+					
 					if (attempts >= maxAttempts) {
-						console.error("❌ Timeout waiting for POS Profile after", maxWaitTime / 1000, "seconds");
-						reject(new Error(`Timeout waiting for POS Profile after ${maxWaitTime / 1000} seconds`));
+						console.error("❌ Timeout waiting for POS Profile after", maxAttempts, "seconds");
+						// Don't reject completely - try to continue with empty profile
+						console.warn("⚠️ Continuing with emergency POS Profile - some features may not work");
+						this.pos_profile = { 
+							name: "Emergency Profile",
+							warehouse: "Stores - TEST",
+							selling_price_list: "Standard Selling",
+							currency: "USD",
+							posa_local_storage: false
+						};
+						this._waitingForProfile = null; // Clear the waiting flag
+						resolve(true);
 						return;
 					}
 					
-					// Show progress every 2 seconds
-					if (attempts % 4 === 0) {
-						console.log(`⏳ Still waiting for POS Profile... (${Math.round(attempts * 500 / 1000)}s elapsed)`);
+					// Show progress every 3 seconds
+					if (attempts % 3 === 0) {
+						console.log(`⏳ Still waiting for POS Profile... (${attempts}s elapsed)`);
 					}
 					
-					setTimeout(checkProfile, 500);
+					setTimeout(checkProfile, 1000); // Check every 1 second instead of 500ms
 				};
 				
 				checkProfile();
 			});
+			
+			return this._waitingForProfile;
 		},
 		
 		// VPS optimization: Circuit breaker methods
@@ -4673,6 +4816,32 @@ export default {
 			this.get_items_groups();
 			this.items_view = this.pos_profile.posa_default_card_view ? "card" : "list";
 		});
+		
+		// Add event listener for POS Profile requests
+		this.eventBus.on("request_pos_profile", async () => {
+			// Rate limit to prevent infinite loops - only allow one request per 5 seconds
+			const now = Date.now();
+			if (this._lastProfileRequest && (now - this._lastProfileRequest) < 5000) {
+				console.log("⚠️ Rate limiting POS Profile request - too frequent");
+				return;
+			}
+			this._lastProfileRequest = now;
+			
+			console.log("📡 Received POS Profile request, attempting to fetch...");
+			try {
+				const profile = await ensurePosProfile();
+				if (profile && profile.name) {
+					console.log("✅ Successfully fetched profile on request:", profile.name);
+					this.pos_profile = profile;
+					// Emit that profile is now available
+					this.eventBus.emit("pos_profile_available", profile);
+				} else {
+					console.warn("⚠️ No profile returned from ensurePosProfile");
+				}
+			} catch (error) {
+				console.error("❌ Failed to fetch profile on request:", error);
+			}
+		});
 		this.eventBus.on("update_cur_items_details", () => {
 			this.update_cur_items_details();
 		});
@@ -4777,9 +4946,41 @@ export default {
 	},
 
 	async mounted() {
-		const profile = await ensurePosProfile();
-		if (!this.pos_profile || Object.keys(this.pos_profile).length === 0) {
-			this.pos_profile = profile || {};
+		console.log("🚀 ItemsSelector mounting...");
+		
+		try {
+			// Try to get POS Profile with better error handling
+			let profile = null;
+			try {
+				profile = await ensurePosProfile();
+				if (profile && profile.name) {
+					console.log("✅ POS Profile loaded successfully:", profile.name);
+					this.pos_profile = profile;
+				}
+			} catch (error) {
+				console.warn("⚠️ Failed to load POS Profile on mount:", error.message);
+			}
+			
+			// Ensure we have some profile to work with
+			if (!this.pos_profile || Object.keys(this.pos_profile).length === 0) {
+				if (profile && Object.keys(profile).length > 0) {
+					this.pos_profile = profile;
+				} else {
+					console.warn("⚠️ No POS Profile available, using default settings");
+					this.pos_profile = {
+						name: "Default Profile",
+						posa_local_storage: false,
+						currency: "USD"
+					};
+				}
+			}
+		} catch (error) {
+			console.error("❌ Critical error in mounted():", error);
+			this.pos_profile = {
+				name: "Emergency Profile",
+				posa_local_storage: false,
+				currency: "USD"
+			};
 		}
 		
 		// Apply correct page limit based on local storage option
@@ -4788,6 +4989,7 @@ export default {
 		this.itemsPageLimit = isNonLocalStorageMode ? 500 : this.maxLocalStorageItems;
 		
 		console.log("ItemsSelector mounted with mode:", {
+			profile_name: this.pos_profile.name,
 			local_storage: this.pos_profile.posa_local_storage,
 			page_limit: this.itemsPageLimit,
 			non_local_storage_mode: isNonLocalStorageMode

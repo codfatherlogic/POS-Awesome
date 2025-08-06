@@ -40,25 +40,37 @@ export function usePosShift(openDialog) {
         
         // Try API call with timeout and retry logic
         let attempts = 0;
-        const maxAttempts = 3;
+        const maxAttempts = 5; // Increased attempts
         
         while (attempts < maxAttempts) {
             attempts++;
             try {
                 console.log(`🔄 Attempt ${attempts}/${maxAttempts} to load POS Profile from server...`);
                 
+                // First check if frappe is ready
+                if (!frappe || !frappe.call) {
+                    console.warn("Frappe not ready, waiting...");
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
+                }
+                
                 const result = await new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
-                        reject(new Error('API timeout'));
-                    }, 15000); // 15 second timeout
+                        reject(new Error(`API timeout after 30 seconds (attempt ${attempts})`));
+                    }, 30000); // Increased to 30 second timeout
                     
-                    frappe.call("posawesome.posawesome.api.shifts.check_opening_shift", {
-                        user: frappe.session.user,
+                    frappe.call({
+                        method: "posawesome.posawesome.api.shifts.check_opening_shift",
+                        args: {
+                            user: frappe.session.user,
+                        },
+                        timeout: 25000, // 25 second frappe timeout
                     }).then((r) => {
                         clearTimeout(timeout);
                         resolve(r);
                     }).catch((error) => {
                         clearTimeout(timeout);
+                        console.error("Frappe call error:", error);
                         reject(error);
                     });
                 });
@@ -107,6 +119,15 @@ export function usePosShift(openDialog) {
             } catch (error) {
                 console.error(`❌ Attempt ${attempts} failed:`, error);
                 
+                // Add specific error handling for different error types
+                if (error.message && error.message.includes('timeout')) {
+                    console.warn(`⏰ Timeout on attempt ${attempts}, the server might be slow`);
+                } else if (error.message && error.message.includes('500')) {
+                    console.warn(`🔧 Server error on attempt ${attempts}, checking server status`);
+                } else {
+                    console.warn(`🌐 Network/API error on attempt ${attempts}:`, error.message);
+                }
+                
                 if (attempts >= maxAttempts) {
                     // Final attempt failed, try cache one more time or show dialog
                     console.log("🔄 All attempts failed, trying cache again...");
@@ -126,12 +147,23 @@ export function usePosShift(openDialog) {
                         return;
                     }
                     console.log("📋 No cache available, showing opening dialog");
+                    console.error("🚨 POS Profile loading failed completely. Please check:", {
+                        "User": frappe.session.user,
+                        "Last Error": error.message,
+                        "Suggestions": [
+                            "1. Check if user has access to any POS Profile",
+                            "2. Verify POS Profile configuration",
+                            "3. Check network connectivity",
+                            "4. Try refreshing the page"
+                        ]
+                    });
                     openDialog && openDialog();
                     return;
                 } else {
-                    // Wait before retry
-                    console.log(`⏳ Waiting 2 seconds before retry...`);
-                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    // Progressive backoff for retries
+                    const waitTime = attempts * 2000; // 2s, 4s, 6s, 8s, 10s
+                    console.log(`⏳ Waiting ${waitTime/1000} seconds before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
                 }
             }
         }

@@ -10,6 +10,8 @@ export function useServerStats(pollInterval = 10000, windowSize = 60) {
     const loading = ref(true);
     const error = ref(null);
     let timer = null;
+    let retryCount = 0;
+    const maxRetries = 3;
 
     async function fetchServerStats() {
         loading.value = true;
@@ -34,18 +36,40 @@ export function useServerStats(pollInterval = 10000, windowSize = 60) {
                     uptime: uptime
                 });
                 if (history.value.length > windowSize) history.value.shift();
+                retryCount = 0; // Reset retry count on success
             } else {
                 error.value = "No data from server";
             }
         } catch (e) {
+            retryCount++;
+            console.warn(`Server stats fetch failed (attempt ${retryCount}/${maxRetries}):`, e.message || e);
+            
+            // Stop retrying after max attempts to prevent resource exhaustion
+            if (retryCount >= maxRetries) {
+                console.warn("Max retry attempts reached for server stats. Stopping further requests.");
+                error.value = "Server stats temporarily unavailable";
+                if (timer) {
+                    clearInterval(timer);
+                    timer = null;
+                }
+                return;
+            }
+            
             error.value = e.message || e;
         } finally {
             loading.value = false;
         }
     }
 
-    fetchServerStats();
-    timer = window.setInterval(fetchServerStats, pollInterval);
+    // Only start fetching if user is properly authenticated
+    if (frappe.session?.user && frappe.session.user !== 'Guest') {
+        fetchServerStats();
+        timer = window.setInterval(fetchServerStats, pollInterval);
+    } else {
+        console.warn("User not authenticated, skipping server stats");
+        loading.value = false;
+        error.value = "Authentication required";
+    }
 
     onUnmounted(() => {
         if (timer) clearInterval(timer);

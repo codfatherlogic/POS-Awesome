@@ -344,6 +344,8 @@ export default {
 				{ title: __("QTY"), key: "qty", align: "start", required: true },
 				{ title: __("UOM"), key: "uom", align: "start", required: false },
 				{ title: __("Rate"), key: "rate", align: "start", required: true },
+				{ title: __("Inc.Rate"), key: "last_purchase_rate", align: "start", required: false },
+				{ title: __("Cust.Rate"), key: "last_customer_rate", align: "start", required: false },
 				{ title: __("Discount %"), key: "discount_value", align: "start", required: false },
 				{ title: __("Discount Amount"), key: "discount_amount", align: "start", required: false },
 				{ title: __("Amount"), key: "amount", align: "start", required: true },
@@ -359,6 +361,10 @@ export default {
 						if (col.key === "discount_value" && this.pos_profile.posa_display_discount_percentage)
 							return true;
 						if (col.key === "discount_amount" && this.pos_profile.posa_display_discount_amount)
+							return true;
+						if (col.key === "last_purchase_rate" && this.pos_profile.show_last_purchase_rate_in_cart)
+							return true;
+						if (col.key === "last_customer_rate" && this.pos_profile.custom_show_last_custom_rate)
 							return true;
 						return false;
 					})

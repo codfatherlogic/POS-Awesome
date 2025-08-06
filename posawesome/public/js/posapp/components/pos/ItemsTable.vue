@@ -77,6 +77,24 @@
 				</div>
 			</template>
 
+			<!-- Last Purchase Rate column -->
+			<template v-slot:item.last_purchase_rate="{ item }">
+				<div v-if="item.last_purchase_rate > 0" class="currency-display">
+					<span class="currency-symbol text-warning">{{ currencySymbol(displayCurrency) }}</span>
+					<span class="amount-value text-warning">{{ formatCurrency(item.last_purchase_rate) }}</span>
+				</div>
+				<span v-else class="text-grey">-</span>
+			</template>
+
+			<!-- Last Customer Rate column -->
+			<template v-slot:item.last_customer_rate="{ item }">
+				<div v-if="item.last_customer_rate > 0" class="currency-display">
+					<span class="currency-symbol text-info">{{ currencySymbol(displayCurrency) }}</span>
+					<span class="amount-value text-info">{{ formatCurrency(item.last_customer_rate) }}</span>
+				</div>
+				<span v-else class="text-grey">-</span>
+			</template>
+
 			<!-- Offer checkbox column -->
 			<template v-slot:item.posa_is_offer="{ item }">
 				<v-checkbox-btn
